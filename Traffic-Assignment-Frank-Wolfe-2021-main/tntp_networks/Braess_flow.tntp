@@ -1,0 +1,10 @@
+Total Travel Time:	552.00000008
+Cost function used:	BPRcostFunction
+User equilibrium (UE) or system optimal (SO):	UE
+
+init_node	term_node	flow	travelTime
+1	3	4.0	40.00000001
+1	4	2.0	52.0
+3	2	2.0	52.0
+3	4	2.0	12.0
+4	2	4.0	40.00000001
