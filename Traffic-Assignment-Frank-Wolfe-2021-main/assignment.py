@@ -166,22 +166,6 @@ def DijkstraHeap(origin, network: FlowTransportNetwork):
                 network.nodeSet[newNode].pred = newPred
 
 
-def BPRcostFunction(optimal: bool,
-                    fft: float,
-                    alpha: float,
-                    flow: float,
-                    capacity: float,
-                    beta: float,
-                    length: float,
-                    maxSpeed: float
-                    ) -> float:
-    if capacity < 1e-3:
-        return np.finfo(np.float32).max
-    if optimal:
-        return fft * (1 + (alpha * math.pow((flow * 1.0 / capacity), beta)) * (beta + 1))
-    return fft * (1 + alpha * math.pow((flow * 1.0 / capacity), beta))
-
-
 def BPRcostFunctionCAV(optimal: bool,
                     fft: float,
                     alpha: float,
@@ -195,10 +179,41 @@ def BPRcostFunctionCAV(optimal: bool,
         return np.finfo(np.float32).max
     if optimal:
         return fft * (1 + (alpha * math.pow((flowCAV * 1.0 / capacity), beta)) * (beta + 1))
-    return fft * (1 + alpha * math.pow((flowCAV * 1.0 / capacity), beta)) * 0.8
+    return fft * (1 + alpha * math.pow((flowCAV * 1.0 / capacity), beta))
 
 
+def BPRcostFunctionHDV(optimal: bool,
+                    fft: float,
+                    alpha: float,
+                    flowHDV: float,
+                    capacity: float,
+                    beta: float,
+                    length: float,
+                    maxSpeed: float
+                    ) -> float:
+    if capacity < 1e-3:
+        return np.finfo(np.float32).max
+    if optimal:
+        return fft * (1 + (alpha * math.pow((flowHDV * 1.0 / capacity), beta)) * (beta + 1))
+    return fft * (1 + alpha * math.pow((flowHDV * 1.0 / capacity), beta)) * 0.8
 
+
+def BPRcostFunction(optimal: bool,
+                    fft: float,
+                    alpha: float,
+                    flow: float,
+                    capacity: float,
+                    beta: float,
+                    length: float,
+                    BPRcostFunctionCAV,
+                    BPRcostFunctionHDV,
+                    maxSpeed: float
+                    ) -> float:
+    if capacity < 1e-3:
+        return np.finfo(np.float32).max
+    if optimal:
+        return (BPRcostFunctionCAV + BPRcostFunctionHDV) * (beta + 1)
+    return BPRcostFunctionCAV + BPRcostFunctionHDV
 
 
 def updateTravelTime(network: FlowTransportNetwork, optimal: bool = False, costFunction=BPRcostFunction, costFunctionCAV=BPRcostFunctionCAV):
@@ -264,11 +279,11 @@ def tracePreds(dest, network: FlowTransportNetwork):
     return spLinks
 
 
-def loadAON(network: FlowTransportNetwork, computeXbar: bool = True):
+def loadAONCAV(network: FlowTransportNetwork, computeXbar: bool = True):
     """
-    This method produces auxiliary flows for all or nothing loading.
+    This method produces auxiliary flows (CAV) for all or nothing loading.
     """
-    x_bar = {l: 0.0 for l in network.linkSet}
+    x_barCAV = {l: 0.0 for l in network.linkSet}
     SPTT = 0.0
     for r in network.originZones:
         DijkstraHeap(r, network=network)
@@ -276,18 +291,44 @@ def loadAON(network: FlowTransportNetwork, computeXbar: bool = True):
             dem = network.tripSet[r, s].demand
             '''define dem for multiclass demand'''
             demCAV = network.tripSet[r, s].demandCAV
-            demHDV = network.tripSet[r, s].demandHDV
+
             '''similarly applied to multiclass traffic distribution though I'm not sure what this is used for'''
-            if dem <= 0 or demCAV <= 0 or demHDV <= 0:
+            if dem <= 0 or demCAV <= 0 :
                 continue
             '''   ???   '''
-            SPTT = SPTT + network.nodeSet[s].label * (demCAV+demHDV)
+            SPTT = SPTT + network.nodeSet[s].label * demCAV
 
             if computeXbar and r != s:
                 for spLink in tracePreds(s, network):
-                    x_bar[spLink] = x_bar[spLink] + dem
+                    x_barCAV[spLink] = x_barCAV[spLink] + demCAV
 
-    return SPTT, x_bar
+    return SPTT, x_barCAV
+
+
+def loadAONHDV(network: FlowTransportNetwork, computeXbar: bool = True):
+    """
+    This method produces auxiliary flows (HDV) for all or nothing loading.
+    """
+    x_barHDV = {l: 0.0 for l in network.linkSet}
+    SPTT = 0.0
+    for r in network.originZones:
+        DijkstraHeap(r, network=network)
+        for s in network.zoneSet[r].destList:
+            dem = network.tripSet[r, s].demand
+            '''define dem for multiclass demand'''
+            demHDV = network.tripSet[r, s].demandHDV
+
+            '''similarly applied to multiclass traffic distribution though I'm not sure what this is used for'''
+            if dem <= 0 or demHDV <= 0 :
+                continue
+            '''   ???   '''
+            SPTT = SPTT + network.nodeSet[s].label * demHDV
+
+            if computeXbar and r != s:
+                for spLink in tracePreds(s, network):
+                    x_barHDV[spLink] = x_barHDV[spLink] + demHDV
+
+    return SPTT, x_barHDV
 
 
 def readDemand(demand_df: pd.DataFrame, network: FlowTransportNetwork):
@@ -394,11 +435,13 @@ def assignment_loop(network: FlowTransportNetwork,
     while gap > accuracy:
 
         # Get x_bar throug all-or-nothing assignment
-        _, x_bar = loadAON(network=network)
+        # _, x_bar = loadAON(network=network)
+        _, x_barCAV = loadAONCAV(network=network)
+        _, x_barHDV = loadAONHDV(network=network)
 
         if algorithm == "MSA" or iteration_number == 1:
             alpha = (1 / iteration_number)
-        elif algorithm == "FW":
+        '''elif algorithm == "FW":
             # If using Frank-Wolfe determine the step size alpha by solving a nonlinear equation
             alpha = findAlpha(x_bar,
                               network=network,
@@ -407,24 +450,29 @@ def assignment_loop(network: FlowTransportNetwork,
         else:
             print("Terminating the program.....")
             print("The solution algorithm ", algorithm, " does not exist!")
-            raise TypeError('Algorithm must be MSA or FW')
+            raise TypeError('Algorithm must be MSA or FW')'''
 
         # Apply flow improvement
         for l in network.linkSet:
-            network.linkSet[l].flow = alpha * x_bar[l] + (1 - alpha) * network.linkSet[l].flow
-
+            '''express the flow of CAV, HDV and total flow in the next iteration'''
+            network.linkSet[l].flowCAV = alpha * x_barCAV[l] + (1 - alpha) * network.linkSet[l].flowCAV
+            network.linkSet[l].flowHDV = alpha * x_barHDV[l] + (1 - alpha) * network.linkSet[l].flowHDV
+            network.linkSet[l].flow = network.linkSet[l].flowCAV + network.linkSet[l].flowHDV
         # Compute the new travel time
         updateTravelTime(network=network,
                          optimal=systemOptimal,
                          costFunction=costFunction)
 
         # Compute the relative gap
-        SPTT, _ = loadAON(network=network, computeXbar=False)
-        SPTT = round(SPTT, 9)
-        TSTT = round(sum([network.linkSet[a].flow * network.linkSet[a].cost for a in
+        SPTTCAV, _ = loadAONCAV(network=network, computeXbar=False)
+        SPTTCAV = round(SPTTCAV, 9)
+        SPTTHDV, _ = loadAONHDV(network=network, computeXbar=False)
+        SPTTHDV = round(SPTTHDV, 9)
+        TSTT = round(sum([network.linkSet[a].flowHDV * network.linkSet[a].costHDV for a in
+                          network.linkSet] + [network.linkSet[a].flowCAV * network.linkSet[a].costCAV for a in
                           network.linkSet]), 9)
-
-        # print(TSTT, SPTT, "TSTT, SPTT, Max capacity", max([l.capacity for l in network.linkSet.values()]))
+        SPTT= SPTTHDV + SPTTCAV
+        # print(TSTT, SPTT, "TSTT, SPTTCAV, Max capacity", max([l.capacity for l in network.linkSet.values()]))
         gap = (TSTT / SPTT) - 1
         if gap < 0:
             print("Error, gap is less than 0, this should not happen")
