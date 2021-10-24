@@ -1,12 +1,12 @@
 # MULTICLASS-Traffic-Assignment-Zhuo
 
-This is modified based on code from MatteoBettini/Traffic-Assignment-Frank-Wolfe-2021 to simply test the multiclass traffic assignment problems.
+This is modified based on code from 'MatteoBettini/Traffic-Assignment-Frank-Wolfe-2021' to simply test the multiclass traffic assignment problems.
 
 This simple script computes the multiclass traffic assignment using the **Frank-Wolfe algorithm (FW)** or the **Method of successive averages (MSA)**.
 
 It can compute the **User Equilibrium (UE)** assignment or the **System Optimal (SO)** assignment.
 
-The travel time cost function that models the effect of congestion on travel time is pluggable and definable by the users. And there are two kinds of BPRcostfunctions for CAV (connected and autonomous vehicles) and HDV (human driven vehciles) with corresponding flow sensitivity expression.
+The travel time cost function that models the effect of congestion on travel time is pluggable and definable by the users. And there are two kinds of BPRcostfunctions for CAV (connected and autonomous vehicles) and HDV (human driven vehciles) respectively with corresponding flow sensitivity expression.
 
 Currently, three cost function implementations are available:
 * BPR cost function ([see more](https://rdrr.io/rforge/travelr/man/bpr.function.html)) -----used for multiclass traffic assignment.
