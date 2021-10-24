@@ -140,7 +140,7 @@ class Demand:
         self.demandHDV = float(demand) * (1 - CAV_proportion)
 
 
-def DijkstraHeap(origin, network: FlowTransportNetwork):
+def DijkstraHeapCAV(origin, network: FlowTransportNetwork):
     """
     Calculates shortest path from an origin to all other destinations.
     The labels and preds are stored in node instances.
@@ -159,7 +159,32 @@ def DijkstraHeap(origin, network: FlowTransportNetwork):
             newNode = toNode
             newPred = currentNode
             existingLabel = network.nodeSet[newNode].label
-            newLabel = currentLabel + network.linkSet[link].cost
+            newLabel = currentLabel + network.linkSet[link].costCAV
+            if newLabel < existingLabel:
+                heapq.heappush(SE, (newLabel, newNode))
+                network.nodeSet[newNode].label = newLabel
+                network.nodeSet[newNode].pred = newPred
+
+def DijkstraHeapHDV(origin, network: FlowTransportNetwork):
+    """
+    Calculates shortest path from an origin to all other destinations.
+    The labels and preds are stored in node instances.
+    """
+    for n in network.nodeSet:
+        network.nodeSet[n].label = np.inf
+        network.nodeSet[n].pred = None
+    network.nodeSet[origin].label = 0.0
+    network.nodeSet[origin].pred = None
+    SE = [(0, origin)]
+    while SE:
+        currentNode = heapq.heappop(SE)[1]
+        currentLabel = network.nodeSet[currentNode].label
+        for toNode in network.nodeSet[currentNode].outLinks:
+            link = (currentNode, toNode)
+            newNode = toNode
+            newPred = currentNode
+            existingLabel = network.nodeSet[newNode].label
+            newLabel = currentLabel + network.linkSet[link].costHDV
             if newLabel < existingLabel:
                 heapq.heappush(SE, (newLabel, newNode))
                 network.nodeSet[newNode].label = newLabel
@@ -195,7 +220,7 @@ def BPRcostFunctionHDV(optimal: bool,
         return np.finfo(np.float32).max
     if optimal:
         return fft * (1 + (alpha * math.pow((flowHDV * 1.0 / capacity), beta)) * (beta + 1))
-    return fft * (1 + alpha * math.pow((flowHDV * 1.0 / capacity), beta)) * 0.8
+    return fft * (1 + alpha * math.pow((flowHDV * 1.0 / capacity), beta)) * 0.6
 
 
 def BPRcostFunction(optimal: bool,
@@ -216,27 +241,30 @@ def BPRcostFunction(optimal: bool,
     return BPRcostFunctionCAV + BPRcostFunctionHDV
 
 
-def updateTravelTime(network: FlowTransportNetwork, optimal: bool = False, costFunction=BPRcostFunction, costFunctionCAV=BPRcostFunctionCAV):
+def updateTravelTime(network: FlowTransportNetwork, optimal: bool = False, costCAV = BPRcostFunctionCAV, costHDV = BPRcostFunctionHDV):
     """
     This method updates the travel time on the links with the current flow
     """
     for l in network.linkSet:
-        network.linkSet[l].cost = costFunction(optimal,
-                                               network.linkSet[l].fft,
-                                               network.linkSet[l].alpha,
-                                               network.linkSet[l].flow,
-                                               network.linkSet[l].capacity,
-                                               network.linkSet[l].beta,
-                                               network.linkSet[l].length,
-                                               network.linkSet[l].speedLimit
-                                               ) + costFunctionCAV(optimal,
-                                               network.linkSet[l].fft,
-                                               network.linkSet[l].alpha,
-                                               network.linkSet[l].flow,
-                                               network.linkSet[l].capacity,
-                                               network.linkSet[l].beta,
-                                               network.linkSet[l].length,
-                                               network.linkSet[l].speedLimit)
+        network.linkSet[l].costCAV = costCAV(optimal,
+                                            network.linkSet[l].fft,
+                                            network.linkSet[l].alpha,
+                                            network.linkSet[l].flowCAV,
+                                            network.linkSet[l].capacity,
+                                            network.linkSet[l].beta,
+                                            network.linkSet[l].length,
+                                            network.linkSet[l].speedLimit,
+                                            )
+        network.linkSet[l].costHDV = costHDV(optimal,
+                                            network.linkSet[l].fft,
+                                            network.linkSet[l].alpha,
+                                            network.linkSet[l].flowHDV,
+                                            network.linkSet[l].capacity,
+                                            network.linkSet[l].beta,
+                                            network.linkSet[l].length,
+                                            network.linkSet[l].speedLimit,
+                                            )
+        network.linkSet[l].cost = network.linkSet[l].costHDV + network.linkSet[l].costCAV
 
 
 def findAlpha(x_bar, network: FlowTransportNetwork, optimal: bool = False, costFunction=BPRcostFunction):
@@ -284,25 +312,24 @@ def loadAONCAV(network: FlowTransportNetwork, computeXbar: bool = True):
     This method produces auxiliary flows (CAV) for all or nothing loading.
     """
     x_barCAV = {l: 0.0 for l in network.linkSet}
-    SPTT = 0.0
+    SPTTCAV = 0.0
     for r in network.originZones:
-        DijkstraHeap(r, network=network)
+        DijkstraHeapCAV(r, network=network)
         for s in network.zoneSet[r].destList:
-            dem = network.tripSet[r, s].demand
             '''define dem for multiclass demand'''
             demCAV = network.tripSet[r, s].demandCAV
 
             '''similarly applied to multiclass traffic distribution though I'm not sure what this is used for'''
-            if dem <= 0 or demCAV <= 0 :
+            if demCAV <= 0 :
                 continue
             '''   ???   '''
-            SPTT = SPTT + network.nodeSet[s].label * demCAV
+            SPTTCAV = SPTTCAV + network.nodeSet[s].label * demCAV
 
             if computeXbar and r != s:
                 for spLink in tracePreds(s, network):
                     x_barCAV[spLink] = x_barCAV[spLink] + demCAV
 
-    return SPTT, x_barCAV
+    return SPTTCAV, x_barCAV
 
 
 def loadAONHDV(network: FlowTransportNetwork, computeXbar: bool = True):
@@ -310,25 +337,24 @@ def loadAONHDV(network: FlowTransportNetwork, computeXbar: bool = True):
     This method produces auxiliary flows (HDV) for all or nothing loading.
     """
     x_barHDV = {l: 0.0 for l in network.linkSet}
-    SPTT = 0.0
+    SPTTHDV = 0.0
     for r in network.originZones:
-        DijkstraHeap(r, network=network)
+        DijkstraHeapHDV(r, network=network)
         for s in network.zoneSet[r].destList:
-            dem = network.tripSet[r, s].demand
             '''define dem for multiclass demand'''
             demHDV = network.tripSet[r, s].demandHDV
 
             '''similarly applied to multiclass traffic distribution though I'm not sure what this is used for'''
-            if dem <= 0 or demHDV <= 0 :
+            if demHDV <= 0 :
                 continue
             '''   ???   '''
-            SPTT = SPTT + network.nodeSet[s].label * demHDV
+            SPTTHDV = SPTTHDV + network.nodeSet[s].label * demHDV
 
             if computeXbar and r != s:
                 for spLink in tracePreds(s, network):
                     x_barHDV[spLink] = x_barHDV[spLink] + demHDV
 
-    return SPTT, x_barHDV
+    return SPTTHDV, x_barHDV
 
 
 def readDemand(demand_df: pd.DataFrame, network: FlowTransportNetwork):
@@ -388,14 +414,14 @@ def readNetwork(network_df: pd.DataFrame, network: FlowTransportNetwork):
     print(len(network.linkSet), "links")
 
 
-def get_TSTT(network: FlowTransportNetwork, costFunction=BPRcostFunction, use_max_capacity: bool = True):
-    TSTT = round(sum([network.linkSet[a].flow * costFunction(optimal=False,
+def get_TSTT(network: FlowTransportNetwork, costCAV=BPRcostFunctionCAV, costHDV = BPRcostFunctionHDV, use_max_capacity: bool = True):
+    TSTTCAV = round(sum([network.linkSet[a].flowCAV * costCAV(optimal=False,
                                                              fft=network.linkSet[
                                                                  a].fft,
                                                              alpha=network.linkSet[
                                                                  a].alpha,
-                                                             flow=network.linkSet[
-                                                                 a].flow,
+                                                             flowCAV=network.linkSet[
+                                                                 a].flowCAV,
                                                              capacity=network.linkSet[
                                                                  a].max_capacity if use_max_capacity else network.linkSet[
                                                                  a].capacity,
@@ -407,13 +433,32 @@ def get_TSTT(network: FlowTransportNetwork, costFunction=BPRcostFunction, use_ma
                                                                  a].speedLimit
                                                              ) for a in
                       network.linkSet]), 9)
+    TSTTHDV = round(sum([network.linkSet[a].flowHDV * costHDV(optimal=False,
+                                                              fft=network.linkSet[
+                                                                  a].fft,
+                                                              alpha=network.linkSet[
+                                                                  a].alpha,
+                                                              flowHDV=network.linkSet[
+                                                                  a].flowHDV,
+                                                              capacity=network.linkSet[
+                                                                  a].max_capacity if use_max_capacity else
+                                                              network.linkSet[
+                                                                  a].capacity,
+                                                              beta=network.linkSet[
+                                                                  a].beta,
+                                                              length=network.linkSet[
+                                                                  a].length,
+                                                              maxSpeed=network.linkSet[
+                                                                  a].speedLimit
+                                                              ) for a in
+                         network.linkSet]), 9)
+    TSTT = TSTTCAV + TSTTHDV
     return TSTT
 
 
 def assignment_loop(network: FlowTransportNetwork,
                     algorithm: str = "MSA",
                     systemOptimal: bool = False,
-                    costFunction=BPRcostFunction,
                     accuracy: float = 0.001,
                     maxIter: int = 1000,
                     maxTime: int = 60,
@@ -461,7 +506,8 @@ def assignment_loop(network: FlowTransportNetwork,
         # Compute the new travel time
         updateTravelTime(network=network,
                          optimal=systemOptimal,
-                         costFunction=costFunction)
+                         costCAV=BPRcostFunctionCAV,
+                         costHDV=BPRcostFunctionHDV)
 
         # Compute the relative gap
         SPTTCAV, _ = loadAONCAV(network=network, computeXbar=False)
@@ -472,7 +518,7 @@ def assignment_loop(network: FlowTransportNetwork,
                           network.linkSet] + [network.linkSet[a].flowCAV * network.linkSet[a].costCAV for a in
                           network.linkSet]), 9)
         SPTT= SPTTHDV + SPTTCAV
-        # print(TSTT, SPTT, "TSTT, SPTTCAV, Max capacity", max([l.capacity for l in network.linkSet.values()]))
+        print(TSTT, SPTT, SPTTCAV, SPTTHDV, "Max capacity", max([l.capacity for l in network.linkSet.values()]))
         gap = (TSTT / SPTT) - 1
         if gap < 0:
             print("Error, gap is less than 0, this should not happen")
@@ -480,11 +526,12 @@ def assignment_loop(network: FlowTransportNetwork,
 
             # Uncomment for debug
 
-            # print("Capacities:", [l.capacity for l in network.linkSet.values()])
-            # print("Flows:", [l.flow for l in network.linkSet.values()])
+             #print("Capacities:", [l.capacity for l in network.linkSet.values()])
+            print("FlowsHDV:", [l.flowHDV for l in network.linkSet.values()])
+            print("FlowsCAV:", [l.flowCAV for l in network.linkSet.values()])
 
         # Compute the real total travel time (which in the case of system optimal rounting is different from the TSTT above)
-        TSTT = get_TSTT(network=network, costFunction=costFunction)
+        TSTT = get_TSTT(network=network, costCAV = BPRcostFunctionCAV, costHDV = BPRcostFunctionHDV)
 
         iteration_number += 1
         if iteration_number > maxIter:
@@ -509,10 +556,10 @@ def assignment_loop(network: FlowTransportNetwork,
     return TSTT
 
 
-def writeResults(network: FlowTransportNetwork, output_file: str, costFunction=BPRcostFunction,
+def writeResults(network: FlowTransportNetwork, output_file: str, costCAV=BPRcostFunctionCAV, costHDV = BPRcostFunctionHDV,
                  systemOptimal: bool = False, verbose: bool = True):
     outFile = open(output_file, "w")
-    TSTT = get_TSTT(network=network, costFunction=costFunction)
+    TSTT = get_TSTT(network=network, costCAV = BPRcostFunctionCAV, costHDV = BPRcostFunctionHDV)
     if verbose:
         print("\nTotal system travel time:", f'{TSTT} secs')
     tmpOut = "Total Travel Time:\t" + str(TSTT)
@@ -521,15 +568,24 @@ def writeResults(network: FlowTransportNetwork, output_file: str, costFunction=B
     outFile.write(tmpOut + "\n")
     tmpOut = ["User equilibrium (UE) or system optimal (SO):\t"] + ["SO" if systemOptimal else "UE"]
     outFile.write("".join(tmpOut) + "\n\n")
-    tmpOut = "init_node\tterm_node\tflow\ttravelTime"
+    tmpOut = "init_node\tterm_node\tflowHDV\tflowCAV\ttravelTimeCAV\ttravelTimeHDV"
     outFile.write(tmpOut + "\n")
     for i in network.linkSet:
         tmpOut = str(network.linkSet[i].init_node) + "\t" + str(
             network.linkSet[i].term_node) + "\t" + str(
-            network.linkSet[i].flow) + "\t" + str(costFunction(False,
+            network.linkSet[i].flowHDV) + "\t" + str(
+            network.linkSet[i].flowCAV) + "\t" + str(costCAV(False,
                                                                network.linkSet[i].fft,
                                                                network.linkSet[i].alpha,
-                                                               network.linkSet[i].flow,
+                                                               network.linkSet[i].flowCAV,
+                                                               network.linkSet[i].max_capacity,
+                                                               network.linkSet[i].beta,
+                                                               network.linkSet[i].length,
+                                                               network.linkSet[i].speedLimit
+                                                               )) + "\t" + str(costHDV(False,
+                                                               network.linkSet[i].fft,
+                                                               network.linkSet[i].alpha,
+                                                               network.linkSet[i].flowHDV,
                                                                network.linkSet[i].max_capacity,
                                                                network.linkSet[i].beta,
                                                                network.linkSet[i].length,
@@ -616,7 +672,7 @@ def computeAssingment(net_file: str,
 
     if verbose:
         print("Computing assignment...")
-    TSTT = assignment_loop(network=network, algorithm=algorithm, systemOptimal=systemOptimal, costFunction=costFunction,
+    TSTT = assignment_loop(network=network, algorithm=algorithm, systemOptimal=systemOptimal,
                            accuracy=accuracy, maxIter=maxIter, maxTime=maxTime, verbose=verbose)
 
     if results_file is None:
@@ -624,7 +680,6 @@ def computeAssingment(net_file: str,
 
     writeResults(network=network,
                  output_file=results_file,
-                 costFunction=costFunction,
                  systemOptimal=systemOptimal,
                  verbose=verbose)
 
@@ -639,7 +694,6 @@ if __name__ == '__main__':
 
     total_system_travel_time_optimal = computeAssingment(net_file=net_file,
                                                          algorithm="MSA",
-                                                         costFunction=BPRcostFunction,
                                                          systemOptimal=True,
                                                          verbose=True,
                                                          accuracy=0.00001,
@@ -648,7 +702,6 @@ if __name__ == '__main__':
 
     total_system_travel_time_equilibrium = computeAssingment(net_file=net_file,
                                                              algorithm="MSA",
-                                                             costFunction=BPRcostFunction,
                                                              systemOptimal=False,
                                                              verbose=True,
                                                              accuracy=0.001,
