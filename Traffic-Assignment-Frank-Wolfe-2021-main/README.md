@@ -1,13 +1,15 @@
-# Traffic-Assignment-Frank-Wolfe-2021
+# MULTICLASS-Traffic-Assignment-Zhuo
 
-This simple script computes the traffic assignment using the **Frank-Wolfe algorithm (FW)** or the **Method of successive averages (MSA)**.
+This is modified based on code from MatteoBettini/Traffic-Assignment-Frank-Wolfe-2021 to simply test the multiclass traffic assignment problems.
+
+This simple script computes the multiclass traffic assignment using the **Frank-Wolfe algorithm (FW)** or the **Method of successive averages (MSA)**.
 
 It can compute the **User Equilibrium (UE)** assignment or the **System Optimal (SO)** assignment.
 
-The travel time cost function that models the effect of congestion on travel time is pluggable and definable by the users.
+The travel time cost function that models the effect of congestion on travel time is pluggable and definable by the users. And there are two kinds of BPRcostfunctions for CAV (connected and autonomous vehicles) and HDV (human driven vehciles) with corresponding flow sensitivity expression.
 
 Currently, three cost function implementations are available:
-* BPR cost function ([see more](https://rdrr.io/rforge/travelr/man/bpr.function.html))
+* BPR cost function ([see more](https://rdrr.io/rforge/travelr/man/bpr.function.html)) -----used for multiclass traffic assignment.
 * Greenshields cost function (see Greenshields, B. D., et al. "A study of traffic capacity." Highway research board proceedings. Vol. 1935. National Research Council (USA), Highway Research Board, 1935.)
 * Constant cost function (no congestion effects)
 
@@ -29,5 +31,6 @@ The documentation of the method provides a through description of all the availa
  
  # Acknowledgments
  
-* This work is based on [Traffic-Assignment](https://github.com/prameshk/Traffic-Assignment). I focused on fixing this implementation and extending it to pluggable cost functions and user optimal flows.
-* All the networks I used for testing the correctness of the algorithm are available at [TransportationNetworks](https://github.com/bstabler/TransportationNetworks).
+* This work is based on [Traffic-Assignment](https://github.com/prameshk/Traffic-Assignment). and MatteoBettini/Traffic-Assignment-Frank-Wolfe-2021.  I focused on implementation of multiclass traffic assignments based on the work from precursors.
+* All the networks used for testing the correctness of the algorithm are available at [TransportationNetworks](https://github.com/bstabler/TransportationNetworks).
+* further implementation and development will keep uploading as the record of my thesis study in UNSW.
