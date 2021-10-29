@@ -66,7 +66,13 @@ class Node:
 
         # For Dijkstra
         self.label = np.inf
-        self.pred = None
+        # label for CAV
+        self.label8 = np.inf
+        # label for HDV
+        self.label7 = np.inf
+
+        self.predCAV = None
+        self.predHDV = None
 
 
 class Link:
@@ -131,13 +137,17 @@ class Demand:
     def __init__(self,
                  init_node: str,
                  term_node: str,
-                 demand: float
+                 demand: float,
+                 demandCAV: float,
+                 demandHDV: float
                  ):
         self.fromZone = init_node
         self.toNode = term_node
         self.demand = float(demand)
-        self.demandCAV = float(demand) * CAV_proportion
-        self.demandHDV = float(demand) * (1 - CAV_proportion)
+        self.demandCAV = float(demandCAV)
+        self.demandHDV = float(demandHDV)
+        print('demandHDV=', demandHDV)
+        print('demandCAV=', demandCAV)
 
 
 def DijkstraHeapCAV(origin, network: FlowTransportNetwork):
@@ -146,24 +156,24 @@ def DijkstraHeapCAV(origin, network: FlowTransportNetwork):
     The labels and preds are stored in node instances.
     """
     for n in network.nodeSet:
-        network.nodeSet[n].label = np.inf
-        network.nodeSet[n].pred = None
-    network.nodeSet[origin].label = 0.0
-    network.nodeSet[origin].pred = None
+        network.nodeSet[n].label8 = np.inf
+        network.nodeSet[n].predCAV = None
+    network.nodeSet[origin].label8 = 0.0
+    network.nodeSet[origin].predCAV = None
     SE = [(0, origin)]
     while SE:
         currentNode = heapq.heappop(SE)[1]
-        currentLabel = network.nodeSet[currentNode].label
+        currentLabel = network.nodeSet[currentNode].label8
         for toNode in network.nodeSet[currentNode].outLinks:
             link = (currentNode, toNode)
             newNode = toNode
-            newPred = currentNode
-            existingLabel = network.nodeSet[newNode].label
-            newLabel = currentLabel + network.linkSet[link].costCAV
-            if newLabel < existingLabel:
-                heapq.heappush(SE, (newLabel, newNode))
-                network.nodeSet[newNode].label = newLabel
-                network.nodeSet[newNode].pred = newPred
+            newPredCAV= currentNode
+            existingLabel = network.nodeSet[newNode].label8
+            newLabel8 = currentLabel + network.linkSet[link].costCAV
+            if newLabel8 < existingLabel:
+                heapq.heappush(SE, (newLabel8, newNode))
+                network.nodeSet[newNode].label8 = newLabel8
+                network.nodeSet[newNode].predCAV = newPredCAV
 
 def DijkstraHeapHDV(origin, network: FlowTransportNetwork):
     """
@@ -171,56 +181,59 @@ def DijkstraHeapHDV(origin, network: FlowTransportNetwork):
     The labels and preds are stored in node instances.
     """
     for n in network.nodeSet:
-        network.nodeSet[n].label = np.inf
-        network.nodeSet[n].pred = None
-    network.nodeSet[origin].label = 0.0
-    network.nodeSet[origin].pred = None
+        network.nodeSet[n].label7 = np.inf
+        network.nodeSet[n].predHDV = None
+    network.nodeSet[origin].label7 = 0.0
+    network.nodeSet[origin].predHDV = None
     SE = [(0, origin)]
     while SE:
         currentNode = heapq.heappop(SE)[1]
-        currentLabel = network.nodeSet[currentNode].label
+        currentLabel = network.nodeSet[currentNode].label7
         for toNode in network.nodeSet[currentNode].outLinks:
             link = (currentNode, toNode)
             newNode = toNode
-            newPred = currentNode
-            existingLabel = network.nodeSet[newNode].label
-            newLabel = currentLabel + network.linkSet[link].costHDV
-            if newLabel < existingLabel:
-                heapq.heappush(SE, (newLabel, newNode))
-                network.nodeSet[newNode].label = newLabel
-                network.nodeSet[newNode].pred = newPred
+            newPredHDV = currentNode
+            existingLabel = network.nodeSet[newNode].label7
+            newLabel7 = currentLabel + network.linkSet[link].costHDV
+            if newLabel7 < existingLabel:
+                heapq.heappush(SE, (newLabel7, newNode))
+                network.nodeSet[newNode].label7 = newLabel7
+                network.nodeSet[newNode].predHDV = newPredHDV
 
 
 def BPRcostFunctionCAV(optimal: bool,
+                        fft: float,
+                        alpha: float,
+                        flowCAV: float,
+                        capacity: float,
+                        beta: float,
+                        length: float,
+                        flowHDV: float,
+                        maxSpeed: float
+                        ) -> float:
+    if capacity < 1e-3:
+        return np.finfo(np.float32).max
+    if optimal:
+        return fft * (1 + (alpha * math.pow((flowCAV * 1.0 / capacity), beta)) * (beta + 1))
+    return fft * (1 + alpha * math.pow(((flowCAV * 1.0 + 1.0 * flowHDV) / capacity), beta)) + 0.06*length
+
+
+
+def BPRcostFunctionHDV(optimal: bool,
                     fft: float,
                     alpha: float,
                     flowCAV: float,
                     capacity: float,
                     beta: float,
                     length: float,
-                    maxSpeed: float
-                    ) -> float:
-    if capacity < 1e-3:
-        return np.finfo(np.float32).max
-    if optimal:
-        return fft * (1 + (alpha * math.pow((flowCAV * 1.0 / capacity), beta)) * (beta + 1))
-    return fft * (1 + alpha * math.pow((flowCAV * 1.0 / capacity), beta))
-
-
-def BPRcostFunctionHDV(optimal: bool,
-                    fft: float,
-                    alpha: float,
                     flowHDV: float,
-                    capacity: float,
-                    beta: float,
-                    length: float,
                     maxSpeed: float
                     ) -> float:
     if capacity < 1e-3:
         return np.finfo(np.float32).max
     if optimal:
         return fft * (1 + (alpha * math.pow((flowHDV * 1.0 / capacity), beta)) * (beta + 1))
-    return fft * (1 + alpha * math.pow((flowHDV * 1.0 / capacity), beta)) * 0.6
+    return fft * (1 + alpha * math.pow(((flowHDV * 1.2 + 1.0 * flowCAV) / capacity), beta)) + 0.08*length
 
 
 def BPRcostFunction(optimal: bool,
@@ -247,27 +260,29 @@ def updateTravelTime(network: FlowTransportNetwork, optimal: bool = False, costC
     """
     for l in network.linkSet:
         network.linkSet[l].costCAV = costCAV(optimal,
-                                            network.linkSet[l].fft,
-                                            network.linkSet[l].alpha,
-                                            network.linkSet[l].flowCAV,
-                                            network.linkSet[l].capacity,
-                                            network.linkSet[l].beta,
-                                            network.linkSet[l].length,
-                                            network.linkSet[l].speedLimit,
+                                             network.linkSet[l].fft,
+                                             network.linkSet[l].alpha,
+                                             network.linkSet[l].flowCAV,
+                                             network.linkSet[l].capacity,
+                                             network.linkSet[l].beta,
+                                             network.linkSet[l].length,
+                                             network.linkSet[l].flowHDV,
+                                             network.linkSet[l].speedLimit
                                             )
         network.linkSet[l].costHDV = costHDV(optimal,
-                                            network.linkSet[l].fft,
-                                            network.linkSet[l].alpha,
-                                            network.linkSet[l].flowHDV,
-                                            network.linkSet[l].capacity,
-                                            network.linkSet[l].beta,
-                                            network.linkSet[l].length,
-                                            network.linkSet[l].speedLimit,
+                                             network.linkSet[l].fft,
+                                             network.linkSet[l].alpha,
+                                             network.linkSet[l].flowCAV,
+                                             network.linkSet[l].capacity,
+                                             network.linkSet[l].beta,
+                                             network.linkSet[l].length,
+                                             network.linkSet[l].flowHDV,
+                                             network.linkSet[l].speedLimit
                                             )
         network.linkSet[l].cost = network.linkSet[l].costHDV + network.linkSet[l].costCAV
 
 
-def findAlpha(x_bar, network: FlowTransportNetwork, optimal: bool = False, costFunction=BPRcostFunction):
+'''def findAlpha(x_bar, network: FlowTransportNetwork, optimal: bool = False, costFunction=BPRcostFunction):
     """
     This uses unconstrained optimization to calculate the optimal step size required
     for Frank-Wolfe Algorithm
@@ -291,20 +306,35 @@ def findAlpha(x_bar, network: FlowTransportNetwork, optimal: bool = False, costF
         return sum_derivative
 
     sol = fsolve(df, np.array([0.5]))
-    return max(0, min(1, sol[0]))
+    return max(0, min(1, sol[0]))'''
 
 
-def tracePreds(dest, network: FlowTransportNetwork):
+def tracePredsCAV(destCAV, network: FlowTransportNetwork):
     """
     This method traverses predecessor nodes in order to create a shortest path
     """
-    prevNode = network.nodeSet[dest].pred
-    spLinks = []
-    while prevNode is not None:
-        spLinks.append((prevNode, dest))
-        dest = prevNode
-        prevNode = network.nodeSet[dest].pred
-    return spLinks
+    prevNodeCAV = network.nodeSet[destCAV].predCAV
+    spLinksCAV = []
+    while prevNodeCAV is not None:
+        spLinksCAV.append((prevNodeCAV, destCAV))
+        destCAV = prevNodeCAV
+        prevNodeCAV = network.nodeSet[destCAV].predCAV
+        print(spLinksCAV)
+    return spLinksCAV
+
+
+def tracePredsHDV(destHDV, network: FlowTransportNetwork):
+    """
+    This method traverses predecessor nodes in order to create a shortest path
+    """
+    prevNodeHDV = network.nodeSet[destHDV].predHDV
+    spLinksHDV = []
+    while prevNodeHDV is not None:
+        spLinksHDV.append((prevNodeHDV, destHDV))
+        destHDV = prevNodeHDV
+        prevNodeHDV = network.nodeSet[destHDV].predHDV
+        print(spLinksHDV)
+    return spLinksHDV
 
 
 def loadAONCAV(network: FlowTransportNetwork, computeXbar: bool = True):
@@ -318,16 +348,15 @@ def loadAONCAV(network: FlowTransportNetwork, computeXbar: bool = True):
         for s in network.zoneSet[r].destList:
             '''define dem for multiclass demand'''
             demCAV = network.tripSet[r, s].demandCAV
-
             '''similarly applied to multiclass traffic distribution though I'm not sure what this is used for'''
             if demCAV <= 0 :
                 continue
             '''   ???   '''
-            SPTTCAV = SPTTCAV + network.nodeSet[s].label * demCAV
-
+            SPTTCAV = SPTTCAV + network.nodeSet[s].label8 * demCAV
+            #print(SPTTCAV)
             if computeXbar and r != s:
-                for spLink in tracePreds(s, network):
-                    x_barCAV[spLink] = x_barCAV[spLink] + demCAV
+                for spLinksCAV in tracePredsCAV(s, network):
+                    x_barCAV[spLinksCAV] = x_barCAV[spLinksCAV] + demCAV
 
     return SPTTCAV, x_barCAV
 
@@ -343,16 +372,16 @@ def loadAONHDV(network: FlowTransportNetwork, computeXbar: bool = True):
         for s in network.zoneSet[r].destList:
             '''define dem for multiclass demand'''
             demHDV = network.tripSet[r, s].demandHDV
-
+            print(demHDV)
             '''similarly applied to multiclass traffic distribution though I'm not sure what this is used for'''
             if demHDV <= 0 :
                 continue
             '''   ???   '''
-            SPTTHDV = SPTTHDV + network.nodeSet[s].label * demHDV
-
+            SPTTHDV = SPTTHDV + network.nodeSet[s].label7 * demHDV
+            print('SPTTHDV=', SPTTHDV)
             if computeXbar and r != s:
-                for spLink in tracePreds(s, network):
-                    x_barHDV[spLink] = x_barHDV[spLink] + demHDV
+                for spLinksHDV in tracePredsHDV(s, network):
+                    x_barHDV[spLinksHDV] = x_barHDV[spLinksHDV] + demHDV
 
     return SPTTHDV, x_barHDV
 
@@ -363,8 +392,10 @@ def readDemand(demand_df: pd.DataFrame, network: FlowTransportNetwork):
         init_node = str(int(row["init_node"]))
         term_node = str(int(row["term_node"]))
         demand = row["demand"]
+        demandCAV = demand*CAV_proportion
+        demandHDV = demand-demandCAV
 
-        network.tripSet[init_node, term_node] = Demand(init_node, term_node, demand)
+        network.tripSet[init_node, term_node] = Demand(init_node, term_node, demand, demandCAV, demandHDV)
         if init_node not in network.zoneSet:
             network.zoneSet[init_node] = Zone(init_node)
         if term_node not in network.zoneSet:
@@ -422,6 +453,8 @@ def get_TSTT(network: FlowTransportNetwork, costCAV=BPRcostFunctionCAV, costHDV 
                                                                  a].alpha,
                                                              flowCAV=network.linkSet[
                                                                  a].flowCAV,
+                                                             flowHDV=network.linkSet[
+                                                                  a].flowHDV,
                                                              capacity=network.linkSet[
                                                                  a].max_capacity if use_max_capacity else network.linkSet[
                                                                  a].capacity,
@@ -440,6 +473,8 @@ def get_TSTT(network: FlowTransportNetwork, costCAV=BPRcostFunctionCAV, costHDV 
                                                                   a].alpha,
                                                               flowHDV=network.linkSet[
                                                                   a].flowHDV,
+                                                              flowCAV=network.linkSet[
+                                                                  a].flowCAV,
                                                               capacity=network.linkSet[
                                                                   a].max_capacity if use_max_capacity else
                                                               network.linkSet[
@@ -518,7 +553,7 @@ def assignment_loop(network: FlowTransportNetwork,
                           network.linkSet] + [network.linkSet[a].flowCAV * network.linkSet[a].costCAV for a in
                           network.linkSet]), 9)
         SPTT= SPTTHDV + SPTTCAV
-        print(TSTT, SPTT, SPTTCAV, SPTTHDV, "Max capacity", max([l.capacity for l in network.linkSet.values()]))
+        #print(TSTT, SPTT, SPTTCAV, SPTTHDV, "Max capacity", max([l.capacity for l in network.linkSet.values()]))
         gap = (TSTT / SPTT) - 1
         if gap < 0:
             print("Error, gap is less than 0, this should not happen")
@@ -526,7 +561,7 @@ def assignment_loop(network: FlowTransportNetwork,
 
             # Uncomment for debug
 
-             #print("Capacities:", [l.capacity for l in network.linkSet.values()])
+            #print("Capacities:", [l.capacity for l in network.linkSet.values()])
             print("FlowsHDV:", [l.flowHDV for l in network.linkSet.values()])
             print("FlowsCAV:", [l.flowCAV for l in network.linkSet.values()])
 
@@ -568,31 +603,34 @@ def writeResults(network: FlowTransportNetwork, output_file: str, costCAV=BPRcos
     outFile.write(tmpOut + "\n")
     tmpOut = ["User equilibrium (UE) or system optimal (SO):\t"] + ["SO" if systemOptimal else "UE"]
     outFile.write("".join(tmpOut) + "\n\n")
-    tmpOut = "init_node\tterm_node\tflowHDV\tflowCAV\ttravelTimeCAV\ttravelTimeHDV"
+    tmpOut = "init_node\tterm_node\tflowHDV\tflowCAV\ttravelTimeHDV\ttravelTimeCAV"
     outFile.write(tmpOut + "\n")
     for i in network.linkSet:
         tmpOut = str(network.linkSet[i].init_node) + "\t" + str(
             network.linkSet[i].term_node) + "\t" + str(
             network.linkSet[i].flowHDV) + "\t" + str(
-            network.linkSet[i].flowCAV) + "\t" + str(costCAV(False,
+            network.linkSet[i].flowCAV) + "\t" + str(costHDV(False,
                                                                network.linkSet[i].fft,
                                                                network.linkSet[i].alpha,
                                                                network.linkSet[i].flowCAV,
                                                                network.linkSet[i].max_capacity,
                                                                network.linkSet[i].beta,
                                                                network.linkSet[i].length,
-                                                               network.linkSet[i].speedLimit
-                                                               )) + "\t" + str(costHDV(False,
-                                                               network.linkSet[i].fft,
-                                                               network.linkSet[i].alpha,
                                                                network.linkSet[i].flowHDV,
-                                                               network.linkSet[i].max_capacity,
-                                                               network.linkSet[i].beta,
-                                                               network.linkSet[i].length,
-                                                               network.linkSet[i].speedLimit
+                                                               network.linkSet[i].speedLimit,
+                                                               )) + "\t" + str(costCAV(False,
+                                                                                       network.linkSet[i].fft,
+                                                                                       network.linkSet[i].alpha,
+                                                                                       network.linkSet[i].flowCAV,
+                                                                                       network.linkSet[i].max_capacity,
+                                                                                       network.linkSet[i].beta,
+                                                                                       network.linkSet[i].length,
+                                                                                       network.linkSet[i].flowHDV,
+                                                                                       network.linkSet[i].speedLimit,
                                                                ))
         outFile.write(tmpOut + "\n")
     outFile.close()
+
 
 
 def load_network(net_file: str,
