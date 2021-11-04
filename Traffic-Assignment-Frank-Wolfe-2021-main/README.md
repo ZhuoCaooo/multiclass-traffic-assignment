@@ -2,8 +2,11 @@
 FEATURES:
 
 This is modified based on code from `MatteoBettini/Traffic-Assignment-Frank-Wolfe-2021` to simply test the multiclass traffic assignment problems.
+
 -----Traffic Assignments on multicalss Vehicles
+
 -----Data Extraction
+
 -----Data Visuallization
 
 It can compute the **User Equilibrium (UE)** assignment or the **System Optimal (SO)** assignment.
