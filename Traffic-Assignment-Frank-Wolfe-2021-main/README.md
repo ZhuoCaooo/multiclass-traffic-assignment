@@ -1,8 +1,10 @@
 # MULTICLASS-Traffic-Assignment-Zhuo
+FEATURES:
 
 This is modified based on code from `MatteoBettini/Traffic-Assignment-Frank-Wolfe-2021` to simply test the multiclass traffic assignment problems.
-
-This simple script computes the multiclass traffic assignment using the **Frank-Wolfe algorithm (FW)** or the **Method of successive averages (MSA)**.
+-----Traffic Assignments on multicalss Vehicles
+-----Data Extraction
+-----Data Visuallization
 
 It can compute the **User Equilibrium (UE)** assignment or the **System Optimal (SO)** assignment.
 
