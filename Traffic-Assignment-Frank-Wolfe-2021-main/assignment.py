@@ -754,12 +754,14 @@ if __name__ == '__main__':
     CAV_proportion = 0.5
 
     TSTTLIST=[]
+    zindex=[]
 
     for i in range(1,6):
         names['linkflowHDV' + str(i)] = []
         names['linkflowCAV' + str(i)] = []
 
     for toll_rate in tmp:
+        zvalue1 = 0
         #print("CAVPROPORTION==========", toll_rate)
 
         total_system_travel_time_optimal, outputSO = computeAssingment(net_file=net_file,
@@ -785,8 +787,16 @@ if __name__ == '__main__':
             count = count + 1
             names['extHDV'+str(count)] = float(str(outputUE.linkSet[i].flowHDV))
             names['extCAV'+str(count)] = float(str(outputUE.linkSet[i].flowCAV))
+            names['extcostHDV' + str(count)] = float(str(outputUE.linkSet[i].costHDV))
+            names['extcostCAV' + str(count)] = float(str(outputUE.linkSet[i].costCAV))
             if count >=5:
                 break
+
+        for i in range (1,4):
+            zvalue1=zvalue1+names.get('extcostHDV' + str(i)) + names.get('extcostCAV' + str(i))
+
+        zvalue=zvalue1+names.get('extcostHDV' + str(4))
+
 
         "append extraction"
         for i in range(1,6):
@@ -794,9 +804,19 @@ if __name__ == '__main__':
             names['linkflowCAV' + str(i)] = np.append(names.get('linkflowCAV' + str(i)), names.get('extCAV' + str(i)))
 
         TSTTLIST=np.append(TSTTLIST,total_system_travel_time_equilibrium)
+
+        zindex=np.append(zindex,zvalue)
+
     #print("linkflowHDV1=", names.get('linkflowHDV' + str(2)))
     #print("linkflowCAV1=", names.get('linkflowCAV' + str(2)))
-    print('TSTTLIST======', TSTTLIST)
+    #print('TSTTLIST======', TSTTLIST)
+    #print("flow cost==========", names.get('linkflowHDV' + str(4)))
+    print('zindex========',zindex)
+
+
+
+
+
 
     fig = plt.figure()
     x= tmp
@@ -810,7 +830,7 @@ if __name__ == '__main__':
     y8 = names.get('linkflowCAV' + str(3))
     y9 = names.get('linkflowCAV' + str(4))
     y10 = names.get('linkflowCAV' + str(5))
-    y11 = TSTTLIST
+    y11 = zindex
     '''plt.plot(x, y1)
     plt.plot(x, y2)
     plt.plot(x, y3)
@@ -822,10 +842,8 @@ if __name__ == '__main__':
     plt.plot(x, y9, linestyle='dotted')
     plt.plot(x, y10, linestyle='dotted')
     plt.legend(['Link1HDV','Link2/3HDV','Link4HDV','Link5HDV','Link1CAV','Link2CAV','Link3CAV','Link4CAV','Link5CAV'],loc='upper right')'''
-    plt.plot(x,y11)
-    plt.title('TSSS vs Tolling Policy')
+    plt.plot(x,y11, marker='*',ms=5, color='red')
+    plt.title('Zindex vs Tolling Policy')
     plt.xlabel('Tolling Rate')
-    plt.ylabel('TSTT')
+    plt.ylabel('Zindex')
     plt.show()
-
-
