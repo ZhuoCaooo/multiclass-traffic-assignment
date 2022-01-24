@@ -291,7 +291,8 @@ def updateTravelTime(network: FlowTransportNetwork, optimal: bool = False, costC
         network.linkSet[l].cost = network.linkSet[l].costHDV + network.linkSet[l].costCAV
 
 
-'''def findAlpha(x_bar, network: FlowTransportNetwork, optimal: bool = False, costFunction=BPRcostFunction):
+def findAlpha(x_barCAV, x_barHDV, network: FlowTransportNetwork, optimal: bool = False,
+              costFunction=BPRcostFunctionCAV):
     """
     This uses unconstrained optimization to calculate the optimal step size required
     for Frank-Wolfe Algorithm
@@ -301,21 +302,55 @@ def updateTravelTime(network: FlowTransportNetwork, optimal: bool = False, costC
         alpha = max(0, min(1, alpha))
         sum_derivative = 0  # this line is the derivative of the objective function.
         for l in network.linkSet:
-            tmpFlow = alpha * x_bar[l] + (1 - alpha) * network.linkSet[l].flow
-            tmpCost = costFunction(optimal,
-                                   network.linkSet[l].fft,
-                                   network.linkSet[l].alpha,
-                                   tmpFlow,
-                                   network.linkSet[l].capacity,
-                                   network.linkSet[l].beta,
-                                   network.linkSet[l].length,
-                                   network.linkSet[l].speedLimit
-                                   )
-            sum_derivative = sum_derivative + (x_bar[l] - network.linkSet[l].flow) * tmpCost
+            tmpFlowCAV = alpha * x_barCAV[l] + (1 - alpha) * network.linkSet[l].flowCAV
+            tmpCostCAV = costFunction(optimal,
+                                      network.linkSet[l].fft,
+                                      network.linkSet[l].alpha,
+                                      tmpFlowCAV,
+                                      network.linkSet[l].capacity,
+                                      network.linkSet[l].beta,
+                                      network.linkSet[l].length,
+                                      network.linkSet[l].flowHDV,
+                                      network.linkSet[l].speedLimit,
+                                      network.linkSet[l].toll
+                                      )
+
+            sum_derivative = sum_derivative + (x_barCAV[l] - network.linkSet[l].flowCAV) * tmpCostCAV
         return sum_derivative
 
     sol = fsolve(df, np.array([0.5]))
-    return max(0, min(1, sol[0]))'''
+    return max(0, min(1, sol[0]))
+
+
+def findAlphaHDV(x_barCAV, x_barHDV, network: FlowTransportNetwork, optimal: bool = False,
+                 costFunction=BPRcostFunctionHDV):
+    """
+    This uses unconstrained optimization to calculate the optimal step size required
+    for Frank-Wolfe Algorithm
+    """
+
+    def df(alphaHDV):
+        alphaHDV = max(0, min(1, alphaHDV))
+        sum_derivativeHDV = 0  # this line is the derivative of the objective function.
+        for l in network.linkSet:
+            tmpFlowHDV = alphaHDV * x_barHDV[l] + (1 - alphaHDV) * network.linkSet[l].flowHDV
+            tmpCostHDV = costFunction(optimal,
+                                      network.linkSet[l].fft,
+                                      network.linkSet[l].alpha,
+                                      network.linkSet[l].flowCAV,
+                                      network.linkSet[l].capacity,
+                                      network.linkSet[l].beta,
+                                      network.linkSet[l].length,
+                                      tmpFlowHDV,
+                                      network.linkSet[l].speedLimit,
+                                      network.linkSet[l].toll
+                                      )
+            sum_derivativeHDV = sum_derivativeHDV + (x_barHDV[l] - network.linkSet[l].flowHDV) * tmpCostHDV
+        return sum_derivativeHDV
+
+    sol = fsolve(df, np.array([0.5]))
+    print(max(0, min(1, sol[0])))
+    return max(0, min(1, sol[0]))
 
 
 def tracePredsCAV(destCAV, network: FlowTransportNetwork):
@@ -507,7 +542,7 @@ def get_TSTT(network: FlowTransportNetwork, costCAV=BPRcostFunctionCAV, costHDV=
 
 
 def assignment_loop(network: FlowTransportNetwork,
-                    algorithm: str = "MSA",
+                    algorithm: str = "FW",
                     systemOptimal: bool = False,
                     accuracy: float = 0.01,
                     maxIter: int = 1000,
@@ -529,23 +564,36 @@ def assignment_loop(network: FlowTransportNetwork,
     # Check if desired accuracy is reached
     while gap > accuracy:
 
-        # Get x_bar throug all-or-nothing assignment
+        # Get x_bar through all-or-nothing assignment
         # _, x_bar = loadAON(network=network)
         _, x_barCAV = loadAONCAV(network=network)
         _, x_barHDV = loadAONHDV(network=network)
 
         if algorithm == "MSA" or iteration_number == 1:
             alpha = (1 / iteration_number)
-        '''elif algorithm == "FW":
+
+        elif algorithm == "FW":
             # If using Frank-Wolfe determine the step size alpha by solving a nonlinear equation
-            alpha = findAlpha(x_bar,
-                              network=network,
-                              optimal=systemOptimal,
-                              costFunction=costFunction)
+            alphaCAV = findAlpha(x_barCAV,
+                                 x_barHDV,
+                                 network=network,
+                                 optimal=systemOptimal,
+                                 costFunction=BPRcostFunctionCAV)
+            alphaHDV = findAlphaHDV(x_barCAV,
+                                    x_barHDV,
+                                    network=network,
+                                    optimal=systemOptimal,
+                                    costFunction=BPRcostFunctionHDV)
+
+            alpha = min(alphaCAV, alphaHDV)
+            if alpha == 0:
+                alpha = max(alphaCAV, alphaHDV)
+
+
         else:
             print("Terminating the program.....")
             print("The solution algorithm ", algorithm, " does not exist!")
-            raise TypeError('Algorithm must be MSA or FW')'''
+            raise TypeError('Algorithm must be MSA or FW')
 
         # Apply flow improvement
         for l in network.linkSet:
@@ -744,44 +792,45 @@ def computeAssingment(net_file: str,
 
 
 if __name__ == '__main__':
-
     # This is an example usage for calculating System Optimal and User Equilibrium with Frank-Wolfe
     names = locals()
-    net_file = str(PathUtils.braess_net_file)
+    net_file = str(PathUtils.sioux_falls_net_file)
 
     tmp = np.arange(0, 1.5, 0.05)
 
-    CAV_proportion = 0.5
+    CAV_proportion = 0.87
 
-    TSTTLIST=[]
-    zindex=[]
+    TSTTLIST = []
+    zindex = []
 
-    for i in range(1,6):
+    '''for i in range(1,6):
         names['linkflowHDV' + str(i)] = []
         names['linkflowCAV' + str(i)] = []
-
-    for toll_rate in tmp:
+'''
+    '''for toll_rate in tmp:
         zvalue1 = 0
-        #print("CAVPROPORTION==========", toll_rate)
+        #print("CAVPROPORTION==========", toll_rate)'''
+    toll_rate = 0
 
-        total_system_travel_time_optimal, outputSO = computeAssingment(net_file=net_file,
-                                                                       algorithm="MSA",
-                                                                       systemOptimal=True,
+    '''total_system_travel_time_optimal, outputSO = computeAssingment(net_file=net_file,
+                                                                   algorithm="FW",
+                                                                   systemOptimal=True,
+                                                                   verbose=True,
+                                                                   accuracy=0.0001,
+                                                                   maxIter=500,
+                                                                   maxTime=6000000)'''
+
+    total_system_travel_time_equilibrium, outputUE = computeAssingment(net_file=net_file,
+                                                                       algorithm="FW",
+                                                                       systemOptimal=False,
                                                                        verbose=True,
-                                                                       accuracy=0.002,
-                                                                       maxIter=10000,
+                                                                       accuracy=0.0005,
+                                                                       maxIter=500,
                                                                        maxTime=6000000)
 
-        total_system_travel_time_equilibrium, outputUE = computeAssingment(net_file=net_file,
-                                                                           algorithm="MSA",
-                                                                           systemOptimal=False,
-                                                                           verbose=True,
-                                                                           accuracy=0.002,
-                                                                           maxIter=10000,
-                                                                           maxTime=6000000)
-        #print("UE - SO = ", total_system_travel_time_equilibrium - total_system_travel_time_optimal)
+    # print("UE - SO = ", total_system_travel_time_equilibrium - total_system_travel_time_optimal)
 
-        "output extraction"
+'''
         count = 0
         for i in outputUE.linkSet:
             count = count + 1
@@ -806,13 +855,13 @@ if __name__ == '__main__':
         TSTTLIST=np.append(TSTTLIST,total_system_travel_time_equilibrium)
 
         zindex=np.append(zindex,zvalue)
-
+'''
+'''
     #print("linkflowHDV1=", names.get('linkflowHDV' + str(2)))
     #print("linkflowCAV1=", names.get('linkflowCAV' + str(2)))
     #print('TSTTLIST======', TSTTLIST)
     #print("flow cost==========", names.get('linkflowHDV' + str(4)))
-    print('zindex========',zindex)
-
+    #print('zindex========',zindex)
 
 
 
@@ -831,19 +880,22 @@ if __name__ == '__main__':
     y9 = names.get('linkflowCAV' + str(4))
     y10 = names.get('linkflowCAV' + str(5))
     y11 = zindex
-    '''plt.plot(x, y1)
+    
+    lt.plot(x, y1)
     plt.plot(x, y2)
     plt.plot(x, y3)
-    plt.plot(x, y4,  marker='*', ms=5)
+    plt.plot(x, y4,  marker='*', ms=5)p
     plt.plot(x, y5,  marker='o', ms=5)
     plt.plot(x, y6, linestyle='dotted')
     plt.plot(x, y7, linestyle='dotted')
     plt.plot(x, y8, linestyle='dotted')
     plt.plot(x, y9, linestyle='dotted')
     plt.plot(x, y10, linestyle='dotted')
-    plt.legend(['Link1HDV','Link2/3HDV','Link4HDV','Link5HDV','Link1CAV','Link2CAV','Link3CAV','Link4CAV','Link5CAV'],loc='upper right')'''
+    plt.legend(['Link1HDV','Link2/3HDV','Link4HDV','Link5HDV','Link1CAV','Link2CAV','Link3CAV','Link4CAV','Link5CAV'],loc='upper right')
+    
     plt.plot(x,y11, marker='*',ms=5, color='red')
     plt.title('Zindex vs Tolling Policy')
     plt.xlabel('Tolling Rate')
     plt.ylabel('Zindex')
     plt.show()
+'''
