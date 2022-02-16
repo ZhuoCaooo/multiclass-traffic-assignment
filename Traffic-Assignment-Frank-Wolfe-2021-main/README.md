@@ -9,7 +9,7 @@ This is modified based on code from `MatteoBettini/Traffic-Assignment-Frank-Wolf
 
 -----Data Visuallization
 
-It can compute the **User Equilibrium (UE)** assignment or the **System Optimal (SO)** assignment.
+It can compute with the **User Equilibrium (UE)** or the **System Optimal (SO)** assignment strategies, with MSA and modified-FW algorithm for multiclass traffic.
 
 The travel time cost function that models the effect of congestion on travel time is pluggable and definable by the users. And there are two kinds of BPRcostfunctions for CAV (connected and autonomous vehicles) and HDV (human driven vehciles) respectively with corresponding flow sensitivity expression.
 
