@@ -1,6 +1,8 @@
 import math
 import time
 import heapq
+from typing import Tuple, Any
+
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -110,11 +112,17 @@ class Link:
         ''' define cav_flow_initial with corresponding hdv flow, multiclass'''
         self.flowCAV = 0.0
         self.flowHDV = 0.0
+        ''' pre- flows in iterations to calculate the gap'''
+        self.preflowCAV = 0.0
+        self.preflowHDV = 0.0
         '''used in single class traffic assignment'''
         self.cost = self.fft
         ''' define multiclass initial travel cost'''
         self.costCAV = self.fft
         self.costHDV = self.fft
+        ''' define multiclass initial travel cost'''
+        self.precostCAV = self.fft
+        self.precostHDV = self.fft
 
     # Method not used for assignment
     def modify_capacity(self, delta_percentage: float):
@@ -213,13 +221,18 @@ def BPRcostFunctionCAV(optimal: bool,
                        maxSpeed: float,
                        toll: float
                        ) -> float:
+    linkportionCAV = max(0.0001, flowCAV) / max(0.0001, (flowCAV + flowHDV))
+    linkportionHDV = max(0.0001, flowHDV) / max(0.0001, (flowCAV + flowHDV))
+    capacityCAV = capacity * (2 / 3)
+    capacityHDV = capacity * (1 / 3)
+    capacitynew = 1 / (linkportionCAV / capacityCAV + linkportionHDV / capacityHDV)
     if capacity < 1e-3:
         return np.finfo(np.float32).max
     if optimal:
-        return fft * (1 + (math.pow((flowCAV * 1.0 / capacity), beta)) * (beta + 1))
+        return fft * (1 + (alpha * math.pow(((flowCAV * 1.0 + flowHDV * 1.0) / capacitynew), beta)) * (beta + 1))
     if toll == 1:
-        return fft * (1 + math.pow(((flowCAV * 0.8 + 1.2 * flowHDV) / (capacity)), beta))
-    return fft * (1 + math.pow(((flowCAV * 1 + 1 * flowHDV) / (capacity)), beta))
+        return fft * (1 + math.pow(((flowCAV * 0.8 + 1.2 * flowHDV) / capacity), beta))
+    return fft * (1 + alpha * math.pow(((flowCAV * 1.0 + flowHDV * 1.0) / capacitynew), beta))
 
 
 def BPRcostFunctionHDV(optimal: bool,
@@ -233,31 +246,18 @@ def BPRcostFunctionHDV(optimal: bool,
                        maxSpeed: float,
                        toll: float
                        ) -> float:
+    linkportionCAV = max(0.0001, flowCAV) / max(0.0001, (flowCAV + flowHDV))
+    linkportionHDV = max(0.0001, flowHDV) / max(0.0001, (flowCAV + flowHDV))
+    capacityCAV = capacity * (2 / 3)
+    capacityHDV = capacity * (1 / 3)
+    capacitynew = 1 / (linkportionCAV / capacityCAV + linkportionHDV / capacityHDV)
     if capacity < 1e-3:
         return np.finfo(np.float32).max
     if optimal:
-        return fft * (1 + (math.pow((flowHDV * 1.0 / capacity), beta)) * (beta + 1))
+        return fft * (1 + (alpha * math.pow(((flowCAV * 1.0 + flowHDV * 1.0) / capacitynew), beta)) * (beta + 1))
     if toll == 1:
-        return fft * (1 + math.pow(((flowCAV * 0.8 + 1.2 * flowHDV) / (capacity)), beta)) + length * toll_rate
-    return fft * (1 + math.pow(((flowHDV * 1 + 1 * flowCAV) / capacity), beta))
-
-
-def BPRcostFunction(optimal: bool,
-                    fft: float,
-                    alpha: float,
-                    flow: float,
-                    capacity: float,
-                    beta: float,
-                    length: float,
-                    BPRcostFunctionCAV,
-                    BPRcostFunctionHDV,
-                    maxSpeed: float
-                    ) -> float:
-    if capacity < 1e-3:
-        return np.finfo(np.float32).max
-    if optimal:
-        return (BPRcostFunctionCAV + BPRcostFunctionHDV) * (beta + 1)
-    return BPRcostFunctionCAV + BPRcostFunctionHDV
+        return fft * (1 + math.pow(((flowCAV * 0.8 + 1.2 * flowHDV) / capacitynew), beta)) + length * toll_rate
+    return fft * (1 + alpha * math.pow(((flowHDV * 1 + 1 * flowCAV) / capacitynew), beta))
 
 
 def updateTravelTime(network: FlowTransportNetwork, optimal: bool = False, costCAV=BPRcostFunctionCAV,
@@ -291,6 +291,36 @@ def updateTravelTime(network: FlowTransportNetwork, optimal: bool = False, costC
         network.linkSet[l].cost = network.linkSet[l].costHDV + network.linkSet[l].costCAV
 
 
+def updateTravelTimepre(network: FlowTransportNetwork, optimal: bool = False, costCAV=BPRcostFunctionCAV,
+                        costHDV=BPRcostFunctionHDV):
+    """
+    This method updates the travel time on the links with the current flow
+    """
+    for l in network.linkSet:
+        network.linkSet[l].precostCAV = costCAV(optimal,
+                                                network.linkSet[l].fft,
+                                                network.linkSet[l].alpha,
+                                                network.linkSet[l].preflowCAV,
+                                                network.linkSet[l].capacity,
+                                                network.linkSet[l].beta,
+                                                network.linkSet[l].length,
+                                                network.linkSet[l].preflowHDV,
+                                                network.linkSet[l].speedLimit,
+                                                network.linkSet[l].toll
+                                                )
+        network.linkSet[l].precostHDV = costHDV(optimal,
+                                                network.linkSet[l].fft,
+                                                network.linkSet[l].alpha,
+                                                network.linkSet[l].preflowCAV,
+                                                network.linkSet[l].capacity,
+                                                network.linkSet[l].beta,
+                                                network.linkSet[l].length,
+                                                network.linkSet[l].preflowHDV,
+                                                network.linkSet[l].speedLimit,
+                                                network.linkSet[l].toll
+                                                )
+
+
 def findAlpha(x_barCAV, x_barHDV, network: FlowTransportNetwork, optimal: bool = False,
               costFunction=BPRcostFunctionCAV):
     """
@@ -318,7 +348,7 @@ def findAlpha(x_barCAV, x_barHDV, network: FlowTransportNetwork, optimal: bool =
             sum_derivative = sum_derivative + (x_barCAV[l] - network.linkSet[l].flowCAV) * tmpCostCAV
         return sum_derivative
 
-    sol = fsolve(df, np.array([0.5]))
+    sol = fsolve(df, np.array([0.01]))
     return max(0, min(1, sol[0]))
 
 
@@ -348,8 +378,82 @@ def findAlphaHDV(x_barCAV, x_barHDV, network: FlowTransportNetwork, optimal: boo
             sum_derivativeHDV = sum_derivativeHDV + (x_barHDV[l] - network.linkSet[l].flowHDV) * tmpCostHDV
         return sum_derivativeHDV
 
-    sol = fsolve(df, np.array([0.5]))
-    print(max(0, min(1, sol[0])))
+    sol = fsolve(df, np.array([0.01]))
+    return max(0, min(1, sol[0]))
+
+
+def findAlphaPRECAV(x_barCAV, x_barHDV, network: FlowTransportNetwork, optimal: bool = False,
+                    costFunction=BPRcostFunctionCAV):
+    """
+    This uses unconstrained optimization to calculate the optimal step size required
+    for Frank-Wolfe Algorithm
+    """
+
+    def df(alpha):
+        alpha = max(0, min(1, alpha))
+        sum_derivative = 0  # this line is the derivative of the objective function.
+        for l in network.linkSet:
+            tmpFlowCAV = alpha * x_barCAV[l] + (1 - alpha) * network.linkSet[l].flowCAV
+            tmpFlowHDV = alpha * x_barHDV[l] + (1 - alpha) * network.linkSet[l].flowHDV
+            tmpCostCAV = costFunction(optimal,
+                                      network.linkSet[l].fft,
+                                      network.linkSet[l].alpha,
+                                      tmpFlowCAV,
+                                      network.linkSet[l].capacity,
+                                      network.linkSet[l].beta,
+                                      network.linkSet[l].length,
+                                      tmpFlowHDV,
+                                      network.linkSet[l].speedLimit,
+                                      network.linkSet[l].toll
+                                      )
+
+            sum_derivative = sum_derivative + (x_barCAV[l] - network.linkSet[l].flowCAV) * tmpCostCAV
+        return sum_derivative
+
+    sol = fsolve(df, np.array([0.01]))
+    return max(0, min(1, sol[0]))
+
+
+def findAlphaPRE(x_barCAV, x_barHDV, network: FlowTransportNetwork, optimal: bool = False,
+                 costFunction=BPRcostFunctionHDV, costFunctionCAV=BPRcostFunctionCAV):
+    """
+    This uses unconstrained optimization to calculate the optimal step size required
+    for Frank-Wolfe Algorithm
+    """
+
+    def df(alpha):
+        alpha = max(0, min(1, alpha))
+        sum_derivative = 0  # this line is the derivative of the objective function.
+        for l in network.linkSet:
+            tmpFlowCAV = alpha * x_barCAV[l] + (1 - alpha) * network.linkSet[l].flowCAV
+            tmpFlowHDV = alpha * x_barHDV[l] + (1 - alpha) * network.linkSet[l].flowHDV
+            tmpCostHDV = costFunction(optimal,
+                                      network.linkSet[l].fft,
+                                      network.linkSet[l].alpha,
+                                      tmpFlowCAV,
+                                      network.linkSet[l].capacity,
+                                      network.linkSet[l].beta,
+                                      network.linkSet[l].length,
+                                      tmpFlowHDV,
+                                      network.linkSet[l].speedLimit,
+                                      network.linkSet[l].toll
+                                      )
+            tmpCostCAV = costFunctionCAV(optimal,
+                                         network.linkSet[l].fft,
+                                         network.linkSet[l].alpha,
+                                         tmpFlowCAV,
+                                         network.linkSet[l].capacity,
+                                         network.linkSet[l].beta,
+                                         network.linkSet[l].length,
+                                         tmpFlowHDV,
+                                         network.linkSet[l].speedLimit,
+                                         network.linkSet[l].toll
+                                         )
+            sum_derivative = sum_derivative + (x_barHDV[l] - network.linkSet[l].flowHDV) * (tmpCostHDV) + (
+                    x_barCAV[l] - network.linkSet[l].flowCAV) * (tmpCostCAV)
+        return sum_derivative
+
+    sol = fsolve(df, np.array([0.005]))
     return max(0, min(1, sol[0]))
 
 
@@ -377,7 +481,6 @@ def tracePredsHDV(destHDV, network: FlowTransportNetwork):
         spLinksHDV.append((prevNodeHDV, destHDV))
         destHDV = prevNodeHDV
         prevNodeHDV = network.nodeSet[destHDV].predHDV
-        # print(spLinksHDV)
     return spLinksHDV
 
 
@@ -560,7 +663,6 @@ def assignment_loop(network: FlowTransportNetwork,
     gap = np.inf
     TSTT = np.inf
     assignmentStartTime = time.time()
-
     # Check if desired accuracy is reached
     while gap > accuracy:
 
@@ -570,11 +672,12 @@ def assignment_loop(network: FlowTransportNetwork,
         _, x_barHDV = loadAONHDV(network=network)
 
         if algorithm == "MSA" or iteration_number == 1:
-            alpha = (1 / iteration_number)
-
+            alphaCAV = (1 / iteration_number)
+            alphaHDV = (1 / iteration_number)
+            alpha = alphaCAV
         elif algorithm == "FW":
             # If using Frank-Wolfe determine the step size alpha by solving a nonlinear equation
-            alphaCAV = findAlpha(x_barCAV,
+            '''alphaCAV = findAlpha(x_barCAV,
                                  x_barHDV,
                                  network=network,
                                  optimal=systemOptimal,
@@ -587,9 +690,14 @@ def assignment_loop(network: FlowTransportNetwork,
 
             alpha = min(alphaCAV, alphaHDV)
             if alpha == 0:
-                alpha = max(alphaCAV, alphaHDV)
-
-
+                alpha = max(alphaCAV, alphaHDV)'''
+            alpha = findAlphaPRE(x_barCAV,
+                                 x_barHDV,
+                                 network=network,
+                                 optimal=systemOptimal,
+                                 costFunction=BPRcostFunctionHDV,
+                                 costFunctionCAV=BPRcostFunctionCAV)
+            # print(alpha)
         else:
             print("Terminating the program.....")
             print("The solution algorithm ", algorithm, " does not exist!")
@@ -598,26 +706,41 @@ def assignment_loop(network: FlowTransportNetwork,
         # Apply flow improvement
         for l in network.linkSet:
             '''express the flow of CAV, HDV and total flow in the next iteration'''
+            network.linkSet[l].preflowCAV = network.linkSet[l].flowCAV
+            network.linkSet[l].preflowHDV = network.linkSet[l].flowHDV
             network.linkSet[l].flowCAV = alpha * x_barCAV[l] + (1 - alpha) * network.linkSet[l].flowCAV
             network.linkSet[l].flowHDV = alpha * x_barHDV[l] + (1 - alpha) * network.linkSet[l].flowHDV
             network.linkSet[l].flow = network.linkSet[l].flowCAV + network.linkSet[l].flowHDV
         # Compute the new travel time
+        updateTravelTimepre(network=network,
+                            optimal=systemOptimal,
+                            costCAV=BPRcostFunctionCAV,
+                            costHDV=BPRcostFunctionHDV)
+
         updateTravelTime(network=network,
                          optimal=systemOptimal,
                          costCAV=BPRcostFunctionCAV,
                          costHDV=BPRcostFunctionHDV)
-
         # Compute the relative gap
         SPTTCAV, _ = loadAONCAV(network=network, computeXbar=False)
-        SPTTCAV = round(SPTTCAV, 9)
+        SPTTCAV = round(SPTTCAV, 12)
         SPTTHDV, _ = loadAONHDV(network=network, computeXbar=False)
-        SPTTHDV = round(SPTTHDV, 9)
+        SPTTHDV = round(SPTTHDV, 12)
         TSTT = round(sum([network.linkSet[a].flowHDV * network.linkSet[a].costHDV for a in
                           network.linkSet] + [network.linkSet[a].flowCAV * network.linkSet[a].costCAV for a in
-                                              network.linkSet]), 9)
+                                              network.linkSet]), 12)
+        lanesgapHDV = math.pow(round(sum([network.linkSet[a].flowHDV - network.linkSet[a].preflowHDV for a in
+                                          network.linkSet]), 12), 2)
+        lanesgapCAV = math.pow(round(sum([network.linkSet[a].preflowCAV - network.linkSet[a].preflowCAV for a in
+                                          network.linkSet]), 12), 2)
+
+        lanesflowCAV = round(sum([network.linkSet[a].flowCAV for a in network.linkSet]), 12)
+        lanesflowHDV = round(sum([network.linkSet[a].flowHDV for a in network.linkSet]), 12)
+
         SPTT = SPTTHDV + SPTTCAV
         # print(TSTT, SPTT, SPTTCAV, SPTTHDV, "Max capacity", max([l.capacity for l in network.linkSet.values()]))
-        gap = (TSTT / SPTT) - 1
+        gap = 0.5 * math.pow(lanesgapCAV, 0.5) / max(lanesflowCAV,0.0000001) + 0.5 * math.pow(lanesgapHDV, 0.5) / max(lanesflowHDV,0.0000001)
+        # gap = (TSTT / SPTT) - 1
         if gap < 0:
             print("Error, gap is less than 0, this should not happen")
             print("TSTT", "SPTT", TSTT, SPTT)
@@ -649,9 +772,8 @@ def assignment_loop(network: FlowTransportNetwork,
     if verbose:
         print("Assignment converged in ", iteration_number, "iterations")
         print("Assignment took", round(time.time() - assignmentStartTime, 5), "seconds")
-        print("Current gap:", round(gap, 5))
-
-    return TSTT
+        print("Current gap:", round(gap, 12))
+    return TSTT, iteration_number
 
 
 def writeResults(network: FlowTransportNetwork, output_file: str, costCAV=BPRcostFunctionCAV,
@@ -663,7 +785,7 @@ def writeResults(network: FlowTransportNetwork, output_file: str, costCAV=BPRcos
         print("\nTotal system travel time:", f'{TSTT} secs')
     tmpOut = "Total Travel Time:\t" + str(TSTT)
     outFile.write(tmpOut + "\n")
-    tmpOut = "Cost function used:\t" + BPRcostFunction.__name__
+    tmpOut = "Cost function used:\t" + costCAV.__name__
     outFile.write(tmpOut + "\n")
     tmpOut = ["User equilibrium (UE) or system optimal (SO):\t"] + ["SO" if systemOptimal else "UE"]
     outFile.write("".join(tmpOut) + "\n\n")
@@ -737,7 +859,6 @@ def load_network(net_file: str,
 def computeAssingment(net_file: str,
                       demand_file: str = None,
                       algorithm: str = "MSA",  # FW or MSA
-                      costFunction=BPRcostFunction,
                       systemOptimal: bool = False,
                       accuracy: float = 0.005,
                       maxIter: int = 1000,
@@ -745,7 +866,7 @@ def computeAssingment(net_file: str,
                       results_file: str = None,
                       force_net_reprocess: bool = False,
                       verbose: bool = True
-                      ) -> float:
+                      ) -> tuple[Any, FlowTransportNetwork, int]:
     """
     This is the main function to compute the user equilibrium UE (default) or system optimal (SO) traffic assignment
     All the networks present on https://github.com/bstabler/TransportationNetworks following the tntp format can be loaded
@@ -777,7 +898,7 @@ def computeAssingment(net_file: str,
 
     if verbose:
         print("Computing assignment...")
-    TSTT = assignment_loop(network=network, algorithm=algorithm, systemOptimal=systemOptimal,
+    TSTT, iteration_number = assignment_loop(network=network, algorithm=algorithm, systemOptimal=systemOptimal,
                            accuracy=accuracy, maxIter=maxIter, maxTime=maxTime, verbose=verbose)
 
     if results_file is None:
@@ -788,49 +909,62 @@ def computeAssingment(net_file: str,
                           systemOptimal=systemOptimal,
                           verbose=verbose)
 
-    return TSTT, output
+    return TSTT, output,iteration_number
 
 
 if __name__ == '__main__':
     # This is an example usage for calculating System Optimal and User Equilibrium with Frank-Wolfe
     names = locals()
-    net_file = str(PathUtils.sioux_falls_net_file)
-
-    tmp = np.arange(0, 1.5, 0.05)
-
-    CAV_proportion = 0.87
-
+    net_file = str(PathUtils.ND_net_file)
+    ODCOST_1 = []
+    ODCOST_2 = []
+    ODCOST_3 = []
+    ODCOST_4 = []
+    tmp = np.arange(0.1, 1, 0.1)
+    acu = np.append(np.arange(1e-3, 1e-4, -1e-4), np.arange(1e-4, 0 ,-1e-5))
+    #acu = [1e-4]
+    iteration_number_listFW=[]
+    iteration_number_listMSA = []
     TSTTLIST = []
     zindex = []
-
-    '''for i in range(1,6):
+    for i in range(1,20):
         names['linkflowHDV' + str(i)] = []
         names['linkflowCAV' + str(i)] = []
-'''
-    '''for toll_rate in tmp:
+        names['linkcostCAV' + str(i)] = []
+        names['linkcostHDV' + str(i)] = []
+
+    for i in tmp:
+        CAV_proportion = i
+        ODCOST_SUB_1 = 0
+        ODCOST_SUB_2 = 0
+        ODCOST_SUB_3 = 0
+        ODCOST_SUB_4 = 0
+        '''
         zvalue1 = 0
-        #print("CAVPROPORTION==========", toll_rate)'''
-    toll_rate = 0
+        toll_rate = 0
 
-    '''total_system_travel_time_optimal, outputSO = computeAssingment(net_file=net_file,
-                                                                   algorithm="FW",
-                                                                   systemOptimal=True,
-                                                                   verbose=True,
-                                                                   accuracy=0.0001,
-                                                                   maxIter=500,
-                                                                   maxTime=6000000)'''
 
-    total_system_travel_time_equilibrium, outputUE = computeAssingment(net_file=net_file,
+        total_system_travel_time_optimal, outputSO = computeAssingment(net_file=net_file,
                                                                        algorithm="FW",
-                                                                       systemOptimal=False,
+                                                                       systemOptimal=True,
                                                                        verbose=True,
-                                                                       accuracy=0.0005,
-                                                                       maxIter=500,
+                                                                       accuracy=0.0000001,
+                                                                       maxIter=3000,
                                                                        maxTime=6000000)
-
+        '''
+        total_system_travel_time_equilibrium, outputUE, iteration_numberFW = computeAssingment(net_file=net_file,
+                                                                           algorithm="FW",
+                                                                           systemOptimal=False,
+                                                                           verbose=True,
+                                                                           accuracy=1e-5,
+                                                                           maxIter=2000,
+                                                                           maxTime=6000000)
+        #TSTTLIST = np.append(TSTTLIST,total_system_travel_time_equilibrium)
+        #iteration_number_listFW = np.append(iteration_number_listFW, iteration_numberFW)
+        #iteration_number_listMSA = np.append(iteration_number_listMSA, iteration_numberMSA)
     # print("UE - SO = ", total_system_travel_time_equilibrium - total_system_travel_time_optimal)
 
-'''
+
         count = 0
         for i in outputUE.linkSet:
             count = count + 1
@@ -838,51 +972,73 @@ if __name__ == '__main__':
             names['extCAV'+str(count)] = float(str(outputUE.linkSet[i].flowCAV))
             names['extcostHDV' + str(count)] = float(str(outputUE.linkSet[i].costHDV))
             names['extcostCAV' + str(count)] = float(str(outputUE.linkSet[i].costCAV))
-            if count >=5:
+            if count >=19:
                 break
 
-        for i in range (1,4):
-            zvalue1=zvalue1+names.get('extcostHDV' + str(i)) + names.get('extcostCAV' + str(i))
-
-        zvalue=zvalue1+names.get('extcostHDV' + str(4))
-
-
-        "append extraction"
-        for i in range(1,6):
+        for i in [5]:
             names['linkflowHDV' + str(i)] = np.append(names.get('linkflowHDV' + str(i)), names.get('extHDV' + str(i)))
             names['linkflowCAV' + str(i)] = np.append(names.get('linkflowCAV' + str(i)), names.get('extCAV' + str(i)))
 
-        TSTTLIST=np.append(TSTTLIST,total_system_travel_time_equilibrium)
-
-        zindex=np.append(zindex,zvalue)
-'''
-'''
-    #print("linkflowHDV1=", names.get('linkflowHDV' + str(2)))
-    #print("linkflowCAV1=", names.get('linkflowCAV' + str(2)))
-    #print('TSTTLIST======', TSTTLIST)
-    #print("flow cost==========", names.get('linkflowHDV' + str(4)))
-    #print('zindex========',zindex)
 
 
 
+'''        for i in [1,5,7,9,11]:
+            ODCOST_SUB_1 = ODCOST_SUB_1 + names.get('extcostHDV' + str(i)) + names.get('extcostCAV' + str(i))
 
 
-    fig = plt.figure()
-    x= tmp
-    y1 = names.get('linkflowHDV' + str(1))
-    y2 = names.get('linkflowHDV' + str(2))
-    y3 = names.get('linkflowHDV' + str(3))
-    y4 = names.get('linkflowHDV' + str(4))
-    y5 = names.get('linkflowHDV' + str(5))
-    y6 = names.get('linkflowCAV' + str(1))
+        for i in [1,5,7,10,16]:
+            ODCOST_SUB_2 = ODCOST_SUB_2 + names.get('extcostHDV' + str(i)) + names.get('extcostCAV' + str(i))
+
+        for i in [3,5,7,9,11]:
+            ODCOST_SUB_3 = ODCOST_SUB_3 + names.get('extcostHDV' + str(i)) + names.get('extcostCAV' + str(i))
+        for i in [3,5,7,10,16]:
+            ODCOST_SUB_4 = ODCOST_SUB_4 + names.get('extcostHDV' + str(i)) + names.get('extcostCAV' + str(i))
+        ODCOST_1 = np.append(ODCOST_1, ODCOST_SUB_1)
+        ODCOST_2 = np.append(ODCOST_2, ODCOST_SUB_2)
+        ODCOST_3 = np.append(ODCOST_3, ODCOST_SUB_3)
+        ODCOST_4 = np.append(ODCOST_4, ODCOST_SUB_4)
+
+        for i in [1]:
+            zvalue1=zvalue1+names.get('extcostHDV' + str(i)) + names.get('extcostCAV' + str(i))
+
+        zvalue=zvalue1+names.get('extcostHDV' + str(4))'''
+
+
+
+
+'''        for i in [5]:
+            names['linkflowHDV' + str(i)] = np.append(names.get('linkflowHDV' + str(i)), names.get('extHDV' + str(i)))
+            names['linkflowCAV' + str(i)] = np.append(names.get('linkflowCAV' + str(i)), names.get('extCAV' + str(i)))
+            print(names.get('linkflowHDV' + str(5)))'''
+
+
+
+'''        TSTTLIST=np.append(TSTTLIST,total_system_travel_time_equilibrium)
+
+        zindex=np.append(zindex,zvalue)'''
+
+
+
+
+
+
+
+fig = plt.figure()
+
+x1 = tmp
+
+y1 = names.get('linkflowHDV' + str(5))
+y2 = names.get('linkflowCAV' + str(5))
+
+'''    y6 = names.get('linkflowCAV' + str(1))
     y7 = names.get('linkflowCAV' + str(2))
     y8 = names.get('linkflowCAV' + str(3))
     y9 = names.get('linkflowCAV' + str(4))
     y10 = names.get('linkflowCAV' + str(5))
-    y11 = zindex
-    
-    lt.plot(x, y1)
-    plt.plot(x, y2)
+    y11 = zindex'''
+
+'''
+plt.plot(x, y2)
     plt.plot(x, y3)
     plt.plot(x, y4,  marker='*', ms=5)p
     plt.plot(x, y5,  marker='o', ms=5)
@@ -891,11 +1047,15 @@ if __name__ == '__main__':
     plt.plot(x, y8, linestyle='dotted')
     plt.plot(x, y9, linestyle='dotted')
     plt.plot(x, y10, linestyle='dotted')
-    plt.legend(['Link1HDV','Link2/3HDV','Link4HDV','Link5HDV','Link1CAV','Link2CAV','Link3CAV','Link4CAV','Link5CAV'],loc='upper right')
-    
-    plt.plot(x,y11, marker='*',ms=5, color='red')
-    plt.title('Zindex vs Tolling Policy')
-    plt.xlabel('Tolling Rate')
-    plt.ylabel('Zindex')
-    plt.show()
-'''
+    plt.legend(['Link1HDV','Link2/3HDV','Link4HDV','Link5HDV','Link1CAV','Link2CAV','Link3CAV','Link4CAV','Link5CAV'],loc='upper right')'''
+
+plt.plot(x1 , y1,ms=4, color='green')
+
+plt.plot(x1 , y2,ms=4, color='red')
+plt.legend(['linkflowHDV','linkflowCAV'],loc='upper right')
+plt.title('link5 Flow Distribution vs CAV Proportion')
+plt.xlabel('CAV PROP')
+plt.ylabel('Link Flow')
+
+plt.show()
+
