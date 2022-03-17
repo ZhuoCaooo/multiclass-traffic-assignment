@@ -13,9 +13,9 @@ This is modified based on code from `MatteoBettini/Traffic-Assignment-Frank-Wolf
 
 -----Data Visuallization
 
-It can compute with the **User Equilibrium (UE)** or the **System Optimal (SO)** assignment strategies, with MSA and modified-FW algorithm for multiclass traffic.
+It can compute with the **User Equilibrium (UE)** or the **System Optimal (SO)** assignment strategies, ALSO ABILIABLE TO MULTIPLE PRINCIPLES, with **MSA and modified-FW algorithm** for multiclass traffic.
 
-The travel time cost function that models the effect of congestion on travel time is pluggable and definable by the users. And there are two kinds of BPRcostfunctions for CAV (connected and autonomous vehicles) and HDV (human driven vehciles) respectively with corresponding flow sensitivity expression.
+The travel time cost function that models the effect of congestion on travel time is pluggable and definable by the users. And there are two kinds of BPRcostfunctions for CAV (connected and autonomous vehicles) and HDV (human driven vehciles) respectively with corresponding flow sensitivity expression. It needs to be changed to express the adding of specific lanes.
 
 Currently, three cost function implementations are available:
 * BPR cost function ([see more](https://rdrr.io/rforge/travelr/man/bpr.function.html)) -----used for multiclass traffic assignment.
