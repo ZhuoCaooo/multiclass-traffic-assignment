@@ -5,7 +5,7 @@ FEATURES:
 
 This is modified based on code from `MatteoBettini/Traffic-Assignment-Frank-Wolfe-2021` to simply test the multiclass traffic assignment problems.
 
------Traffic Assignments on multiclass Vehicles
+-----Traffic Assignments on **multiclass Vehicles and multiple equilibrium-principle players**
 
 -----Data Extraction
 
