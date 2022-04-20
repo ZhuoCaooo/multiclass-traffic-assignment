@@ -2,7 +2,7 @@ import math
 import time
 import heapq
 from typing import Tuple, Any
-
+from mpl_toolkits import mplot3d
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -14,6 +14,8 @@ from utils import PathUtils
 warnings.filterwarnings('ignore', 'The iteration is not making good progress')
 
 ''' define the proportion of CAVs in total demand'''
+
+
 
 class FlowTransportNetwork:
 
@@ -121,6 +123,8 @@ class Link:
         ''' define multiclass initial travel cost'''
         self.precostCAV = self.fft
         self.precostHDV = self.fft
+        '''vehicle headway settings'''
+
 
     # Method not used for assignment
     def modify_capacity(self, delta_percentage: float):
@@ -219,19 +223,48 @@ def BPRcostFunctionCAV(optimal: bool,
                        maxSpeed: float,
                        toll: float
                        ) -> float:
-    linkportionCAV = max(0.0001, flowCAV) / max(0.0001, (flowCAV + flowHDV))
-    linkportionHDV = max(0.0001, flowHDV) / max(0.0001, (flowCAV + flowHDV))
+    if flowHDV+flowCAV == 0:
+        linkportionCAV=0
+        linkportionHDV=1
+    else:
+        linkportionCAV = flowCAV / (flowCAV + flowHDV)
+        linkportionHDV = flowHDV / (flowCAV + flowHDV)
+
     capacityCAV = capacity * (2 / 3)
     capacityHDV = capacity * (1 / 3)
-    #capacitynew = 1 / (linkportionCAV / capacityCAV + linkportionHDV / capacityHDV)
     capacitynew = capacity
+
+    h00=1.8
+    h11=0.5
+    h10=1.5
+    h01=1.0
+    h10_hat=(h10+h01)/2
+    headway_a = h11+h00-2*h10_hat
+    headway_b = h10_hat-h00
+    capacity_hat=1/(headway_a*linkportionCAV*(1-linkportionCAV)*intensity+headway_a*linkportionCAV*linkportionCAV+2*headway_b*linkportionCAV+h00)
+    capacity_hdv=1/(headway_a*linkportionCAV*linkportionCAV+2*headway_b*linkportionCAV+h00)
+    capacity_toll=capacity_hat/capacity_hdv*capacitynew*tollportion
+    capacity_untoll = capacity_hat / capacity_hdv * capacitynew*(1-tollportion)
+
     if capacity < 1e-3:
         return np.finfo(np.float32).max
     if optimal:
-        return fft * (1 + (alpha * math.pow(((flowCAV * 1.0 + flowHDV * 1.0) / capacitynew), beta)) * (beta + 1))
-    if toll == 1:
-        return fft * (1 + alpha * math.pow(((flowHDV * 1 + 1 * flowCAV) / capacitynew), beta))
-    return fft * (1 + alpha * math.pow(((flowHDV * 1 + 1 * flowCAV) / capacitynew), beta))
+        if toll == 1:
+            return fft * (1 + (alpha * math.pow(((flowCAV * 1.0 + flowHDV * 1.0) / capacity_toll), beta)) * (beta + 1))
+        elif toll == 2:
+            return fft * (1 + (alpha * math.pow(((flowCAV * 1.0 + flowHDV * 1.0) / capacity_untoll), beta)) * (beta + 1))
+        else:
+            return fft * (1 + (alpha * math.pow(((flowCAV * 1.0 + flowHDV * 1.0) / capacitynew), beta)) * (beta + 1))
+
+    if not optimal:
+        if toll == 1:
+            return fft * (1 + math.pow(((flowCAV * 1 + 1 * flowHDV) / capacity_toll), beta)) * VOTCAV
+        if toll == 2:
+            return fft * (1 + math.pow(((flowCAV * 1 + 1 * flowHDV) / capacity_untoll), beta))* VOTCAV
+        else:
+            return fft * (1 + alpha * math.pow(((flowHDV * 1 + 1 * flowCAV) / capacitynew), beta))* VOTCAV
+
+
 
 
 def BPRcostFunctionHDV(optimal: bool,
@@ -245,19 +278,48 @@ def BPRcostFunctionHDV(optimal: bool,
                        maxSpeed: float,
                        toll: float
                        ) -> float:
-    linkportionCAV = max(0.0001, flowCAV) / max(0.0001, (flowCAV + flowHDV))
-    linkportionHDV = max(0.0001, flowHDV) / max(0.0001, (flowCAV + flowHDV))
+    if flowHDV+flowCAV == 0:
+        linkportionCAV=0
+        linkportionHDV=1
+    else:
+        linkportionCAV = flowCAV / (flowCAV + flowHDV)
+        linkportionHDV = flowHDV / (flowCAV + flowHDV)
+
     capacityCAV = capacity * (2 / 3)
     capacityHDV = capacity * (1 / 3)
-#capacitynew = 1 / (linkportionCAV / capacityCAV + linkportionHDV / capacityHDV)
-    capacitynew=capacity
+    capacitynew = capacity
+
+    h00=1.8
+    h11=0.5
+    h10=1.5
+    h01=1.0
+    h10_hat=(h10+h01)/2
+    headway_a = h11+h00-2*h10_hat
+    headway_b = h10_hat-h00
+    capacity_hat=1/(headway_a*linkportionCAV*(1-linkportionCAV)*intensity+headway_a*linkportionCAV*linkportionCAV+2*headway_b*linkportionCAV+h00)
+    capacity_hdv=1/(headway_a*linkportionCAV*linkportionCAV+2*headway_b*linkportionCAV+h00)
+    capacity_toll=capacity_hat/capacity_hdv*capacitynew*tollportion
+    capacity_untoll = capacity_hat / capacity_hdv * capacitynew*(1-tollportion)
+
     if capacity < 1e-3:
         return np.finfo(np.float32).max
+
     if optimal:
-        return fft * (1 + alpha * math.pow(((flowHDV * 1 + 1 * flowCAV) / capacitynew), beta))
-    if toll == 1:
-        return fft * (1 + math.pow(((flowCAV * 1 + 1 * flowHDV) / capacitynew), beta))
-    return fft * (1 + alpha * math.pow(((flowHDV * 1 + 1 * flowCAV) / capacitynew), beta))
+        if toll == 1:
+            return fft * (1 + math.pow(((flowCAV * 1 + 1 * flowHDV) / capacity_toll), beta)) + tollfactor * length
+        if toll == 2:
+            return fft * (1 + math.pow(((flowCAV * 1 + 1 * flowHDV) / capacity_untoll), beta))
+        else:
+            return fft * (1 + alpha * math.pow(((flowHDV * 1 + 1 * flowCAV) / capacitynew), beta))
+
+    if not optimal:
+        if toll == 1:
+            return fft * (1 + math.pow(((flowCAV * 1 + 1 * flowHDV) / capacity_toll), beta))*VOTHDV + tollfactor * length * toll_index
+        if toll == 2:
+            return fft * (1 + math.pow(((flowCAV * 1 + 1 * flowHDV) / capacity_untoll), beta))*VOTHDV
+        else:
+            return fft * (1 + alpha * math.pow(((flowHDV * 1 + 1 * flowCAV) / capacitynew), beta))*VOTHDV
+
 
 
 def updateTravelTime(network: FlowTransportNetwork, optimal: bool = False, costCAV=BPRcostFunctionCAV,
@@ -643,7 +705,7 @@ def get_TSTT(network: FlowTransportNetwork, costCAV=BPRcostFunctionCAV, costHDV=
                                                               ) for a in
                          network.linkSet]), 9)
     TSTT = TSTTCAV + TSTTHDV
-    return TSTT
+    return TSTT, TSTTCAV, TSTTHDV
 
 
 def assignment_loop(network: FlowTransportNetwork,
@@ -712,6 +774,7 @@ def assignment_loop(network: FlowTransportNetwork,
         # Apply flow improvement
         for l in network.linkSet:
             '''express the flow of CAV, HDV and total flow in the next iteration'''
+            '''note that only the HDV flows are renewed, and the CAVs needs to have alphaCAV calculated below'''
             network.linkSet[l].preflowCAV = network.linkSet[l].flowCAV
             network.linkSet[l].preflowHDV = network.linkSet[l].flowHDV
             network.linkSet[l].flowHDV = alpha * x_barHDV[l] + (1 - alpha) * network.linkSet[l].flowHDV
@@ -725,7 +788,7 @@ def assignment_loop(network: FlowTransportNetwork,
                                  optimal=systemOptimal,
                                  costFunction=BPRcostFunctionCAV)
             for l in network.linkSet:
-                '''update flow SO (CAV)'''
+
                 network.linkSet[l].flowCAV = alphaSO * x_barCAV[l] + (1 - alphaSO) * network.linkSet[l].flowCAV
 
         #print(alpha)
@@ -779,7 +842,7 @@ def assignment_loop(network: FlowTransportNetwork,
             print("FlowsCAV:", [l.flowCAV for l in network.linkSet.values()])
 
         # Compute the real total travel time (which in the case of system optimal rounting is different from the TSTT above)
-        TSTT = get_TSTT(network=network, costCAV=BPRcostFunctionCAV, costHDV=BPRcostFunctionHDV)
+        TSTT, TSTTCAV,TSTTHDV = get_TSTT(network=network, costCAV=BPRcostFunctionCAV, costHDV=BPRcostFunctionHDV)
 
         iteration_number += 1
         if iteration_number > maxIter:
@@ -807,7 +870,7 @@ def writeResults(network: FlowTransportNetwork, output_file: str, costCAV=BPRcos
                  costHDV=BPRcostFunctionHDV,
                  systemOptimal: bool = False, verbose: bool = True):
     outFile = open(output_file, "w")
-    TSTT = get_TSTT(network=network, costCAV=BPRcostFunctionCAV, costHDV=BPRcostFunctionHDV)
+    TSTT,TSTTCAV,TSTTHDV = get_TSTT(network=network, costCAV=BPRcostFunctionCAV, costHDV=BPRcostFunctionHDV)
     if verbose:
         print("\nTotal system travel time:", f'{TSTT} secs')
     tmpOut = "Total Travel Time:\t" + str(TSTT)
@@ -927,6 +990,7 @@ def computeAssingment(net_file: str,
         print("Computing assignment...")
     TSTT, iteration_number = assignment_loop(network=network, algorithm=algorithm, systemOptimal=systemOptimal,
                            accuracy=accuracy, maxIter=maxIter, maxTime=maxTime, verbose=verbose)
+    TSTT,TSTTCAV,TSTTHDV= get_TSTT(network=network, costCAV=BPRcostFunctionCAV, costHDV=BPRcostFunctionHDV)
 
     if results_file is None:
         results_file = '_'.join(net_file.split("_")[:-1] + ["flow.tntp"])
@@ -936,81 +1000,345 @@ def computeAssingment(net_file: str,
                           systemOptimal=systemOptimal,
                           verbose=verbose)
 
-    return TSTT, output,iteration_number
+    return TSTT, output,iteration_number,TSTTCAV,TSTTHDV
+
+
+
 
 
 if __name__ == '__main__':
     # This is an example usage for calculating System Optimal and User Equilibrium with Frank-Wolfe
     names = locals()
-    net_file = str(PathUtils.sioux_falls_lanes_net_file)
-    ODCOST_1 = []
-    ODCOST_2 = []
-    ODCOST_3 = []
-    ODCOST_4 = []
-    tmp = [0.5]
-    TSTTgap=[]
-    acu = np.append(np.arange(1e-3, 1e-4, -1e-4), np.arange(1e-4, 0 ,-1e-5))
-    #acu = [1e-4]
-    iteration_number_listFW=[]
-    iteration_number_listMSA = []
-    TSTTUE = []
-    TSTTSO = []
+    net_file1 = str(PathUtils.sioux_falls_lanes_net_file)
+
+
+    tf = np.arange(0,0.65,0.09)
+    #cp=[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
+    cp=[0.1,0.15,0.25,0.35,0.5,0.65,0.8,0.9]
+
+
+    TSTC=[]
     zindex = []
-    count=0
-    for i in range(1,20):
-        names['linkflowHDV' + str(i)] = []
-        names['linkflowCAV' + str(i)] = []
-        names['linkcostCAV' + str(i)] = []
-        names['linkcostHDV' + str(i)] = []
+    VOTCAV = 0
+    CAV_proportion = 0.5
+    loopcount=0
+    VOTHDV=0
+    toll_index=1
+    tollportion = 0.5
+    linkflow26=[]
+    linkflow43=[]
+    linkflow67=[]
+    linkflow65=[]
+    intensity=1
+    for i in tf:
+        for o in cp:
 
-    for i in tmp:
-        CAV_proportion = i
+            tollfactor = i
+            tollportion = o
 
 
-        toll_rate = 0
+            total_system_travel_time_optimal, outputSO, iteration_numberSO,TSTTCAV,TSTTHDV = computeAssingment(net_file=net_file1,
+                                                                                                           algorithm="FW",
+                                                                                                           systemOptimal=True,
+                                                                                                           verbose=True,
+                                                                                                           accuracy=5e-5,
+                                                                                                           maxIter=80000,
+                                                                                                           maxTime=6000000)
+            TSTC=np.append(TSTC,TSTTHDV)
 
 
-        total_system_travel_time_optimal, outputSO, iteration_numberSO  = computeAssingment(net_file=net_file,
+
+            loopcount=loopcount+1
+            print(loopcount)
+
+fig = plt.figure()
+ax = plt.axes(projection='3d')
+xv,TOLLFACTOR=np.meshgrid(cp,tf)
+Z=np.reshape(TSTC,(8,8))
+
+
+
+ax.plot_surface(xv, TOLLFACTOR, Z, rstride=1, cstride=1,
+                cmap='viridis', edgecolor='none')
+
+ax.set_title('Total Revenue');
+
+ax.set_xlabel('Ml Portion')
+ax.set_ylabel('Toll Rate')
+ax.set_zlabel('Revenue');
+
+plt.show()
+
+
+'''
+fig = plt.figure()
+
+x = tf
+
+y1=linkflow26
+y2=linkflow43
+y3=linkflow67
+y4=linkflow65
+
+
+
+plt.plot(x, y1)
+plt.plot(x, y2)
+plt.plot(x, y3)
+plt.plot(x, y4)
+
+plt.legend(['ML on Link26','ML on Link43','ML on Link67','ML on Link65'],loc='upper right')
+
+
+
+#plt.plot(x1 , y2, ms=4,marker='*', color='red')
+#plt.legend(['TSTT_UE','TSTT_MULTI'],loc='upper right')
+plt.title('HDV Users on ML')
+plt.xlabel('Toll Rates')
+plt.ylabel('HDV Flow')
+
+plt.show()
+'''
+
+'''
+linkflow26 = np.append(linkflow26, names.get('extHDV' + str(1)))
+linkflow43 = np.append(linkflow43, names.get('extHDV' + str(5)))
+linkflow67 = np.append(linkflow67, names.get('extHDV' + str(9)))
+linkflow65 = np.append(linkflow65, names.get('extHDV' + str(13)))
+'''
+'''
+count = 0
+for i in outputSO.linkSet:
+    count = count + 1
+    names['extHDV' + str(count)] = float(str(outputSO.linkSet[i].flowHDV))
+    names['extCAV' + str(count)] = float(str(outputSO.linkSet[i].flowCAV))
+    names['extcostHDV' + str(count)] = float(str(outputSO.linkSet[i].costHDV))
+    names['extcostCAV' + str(count)] = float(str(outputSO.linkSet[i].costCAV))
+    if count >= 93:
+        break
+
+linkflow26 = np.append(linkflow26, names.get('extHDV' + str(3)))
+linkflow43 = np.append(linkflow43, names.get('extHDV' + str(7)))
+linkflow67 = np.append(linkflow67, names.get('extHDV' + str(11)))
+linkflow65 = np.append(linkflow65, names.get('extHDV' + str(15)))
+'''
+
+
+'''
+fig = plt.figure()
+ax = plt.axes(projection='3d')
+xv,TOLLFACTOR=np.meshgrid(cp,tf)
+Z=np.reshape(TSTC,(9,9))
+
+
+
+ax.plot_surface(xv, TOLLFACTOR, Z, rstride=1, cstride=1,
+                cmap='viridis', edgecolor='none')
+
+ax.set_title('Toll Revenue');
+
+ax.set_xlabel('ML Portion')
+ax.set_ylabel('Toll Rate')
+ax.set_zlabel('Revenue');
+
+plt.show()
+'''
+
+'''count = 0
+for i in outputSO.linkSet:
+    count = count + 1
+    names['extHDV' + str(count)] = float(str(outputSO.linkSet[i].flowHDV))
+    names['extCAV' + str(count)] = float(str(outputSO.linkSet[i].flowCAV))
+    names['extcostHDV' + str(count)] = float(str(outputSO.linkSet[i].costHDV))
+    names['extcostCAV' + str(count)] = float(str(outputSO.linkSet[i].costCAV))
+    if count >= 23:
+        break
+
+linkflow1 = np.append(linkflow1, names.get('extHDV' + str(8)))
+linkflow2 = np.append(linkflow2, names.get('extHDV' + str(14)))'''
+
+'''    for i in tmp:
+        tollfactor = 0.1
+        tollportion = 0.3
+        CAV_proportion = 0.5
+        intensity=i
+        total_system_travel_time_optimal, outputSO, iteration_numberSO  = computeAssingment(net_file=net_file1,
                                                                        algorithm="FW",
                                                                        systemOptimal=True,
                                                                        verbose=True,
-                                                                       accuracy=4e-5,
+                                                                       accuracy=2e-4,
                                                                        maxIter=8000,
                                                                        maxTime=6000000)
-        TSTTSO=np.append(TSTTSO,total_system_travel_time_optimal)
-        '''
-        total_system_travel_time_UE, outputUE, iteration_numberUE = computeAssingment(net_file=net_file,
+        TSTTSO3 = np.append(TSTTSO3, total_system_travel_time_optimal)
+
+        tollfactor = 0
+        tollportion = 0.3
+        CAV_proportion = 0.5
+        intensity=i
+        total_system_travel_time_optimal, outputSO, iteration_numberSO  = computeAssingment(net_file=net_file1,
                                                                        algorithm="FW",
-                                                                       systemOptimal=False,
+                                                                       systemOptimal=True,
                                                                        verbose=True,
-                                                                       accuracy=4e-5,
+                                                                       accuracy=2e-4,
                                                                        maxIter=8000,
                                                                        maxTime=6000000)
-        TSTTUE=np.append(TSTTUE,total_system_travel_time_UE)
-        '''
-        #TSTTgap=np.append(TSTTgap, total_system_travel_time_UE-total_system_travel_time_optimal)
+        TSTTSO4 = np.append(TSTTSO4, total_system_travel_time_optimal)
 
-        count=count+1
-        print(count)
+    for i in tmp:
+        tollfactor = 0.1
+        tollportion = 0.4
+        CAV_proportion = 0.5
+        intensity=i
+        total_system_travel_time_optimal, outputSO, iteration_numberSO  = computeAssingment(net_file=net_file1,
+                                                                       algorithm="FW",
+                                                                       systemOptimal=True,
+                                                                       verbose=True,
+                                                                       accuracy=2e-4,
+                                                                       maxIter=8000,
+                                                                       maxTime=6000000)
+        TSTTSO5 = np.append(TSTTSO5, total_system_travel_time_optimal)
 
-        print(TSTTSO)
-        print(TSTTUE)
+        tollfactor = 0
+        tollportion = 0.4
+        CAV_proportion = 0.5
+        intensity=i
+        total_system_travel_time_optimal, outputSO, iteration_numberSO  = computeAssingment(net_file=net_file1,
+                                                                       algorithm="FW",
+                                                                       systemOptimal=True,
+                                                                       verbose=True,
+                                                                       accuracy=2e-4,
+                                                                       maxIter=8000,
+                                                                       maxTime=6000000)
+        TSTTSO6 = np.append(TSTTSO6, total_system_travel_time_optimal)
+
+
+    for i in tmp:
+        tollfactor = 0.1
+        tollportion = 0.5
+        CAV_proportion = 0.5
+        intensity=i
+        total_system_travel_time_optimal, outputSO, iteration_numberSO  = computeAssingment(net_file=net_file1,
+                                                                       algorithm="FW",
+                                                                       systemOptimal=True,
+                                                                       verbose=True,
+                                                                       accuracy=2e-4,
+                                                                       maxIter=8000,
+                                                                       maxTime=6000000)
+        TSTTSO7 = np.append(TSTTSO7, total_system_travel_time_optimal)
+
+        tollfactor = 0
+        tollportion = 0.5
+        CAV_proportion = 0.5
+        intensity=i
+        total_system_travel_time_optimal, outputSO, iteration_numberSO  = computeAssingment(net_file=net_file1,
+                                                                       algorithm="FW",
+                                                                       systemOptimal=True,
+                                                                       verbose=True,
+                                                                       accuracy=2e-4,
+                                                                       maxIter=8000,
+                                                                       maxTime=6000000)
+        TSTTSO8 = np.append(TSTTSO8, total_system_travel_time_optimal)'''
+
+'''for i in range(1, 24):
+    names['linkflowHDV' + str(i)] = []
+    names['linkflowCAV' + str(i)] = []
+    names['linkcostCAV' + str(i)] = []
+    names['linkcostHDV' + str(i)] = []
+    names['TSTTSO' + str(i)] = []'''
+'''TSTTgap1=TSTTSO2-TSTTSO1
+TSTTgap2=TSTTSO4-TSTTSO3
+TSTTgap3=TSTTSO6-TSTTSO5
+TSTTgap4=TSTTSO8-TSTTSO7
+
+print(TSTTgap1)
+print(TSTTgap2)
+print(tmp)
+
 fig = plt.figure()
 
-x1 = tmp
+x = tmp
 
-y1 = TSTTSO
-y2= TSTTUE
+y1=TSTTgap1
+y2=TSTTgap2
+y3=TSTTgap3
+y4=TSTTgap4
 
 
-plt.plot(x1 , y1,ms=4, color='orange')
-plt.plot(x1 , y2, ms=4,marker='*', color='red')
-plt.legend(['TSTT_Multiplayer','TSTT_UE'],loc='upper right')
-plt.title('TSTT with Multiplayer Or ALL_UE')
+
+plt.plot(x, y1)
+plt.plot(x, y2)
+plt.plot(x, y3)
+plt.plot(x, y4)
+
+plt.legend(['Ea=0.2','Ea=0.3','Ea=0.4','Ea=0.5'],loc='upper right')
+
+
+
+#plt.plot(x1 , y2, ms=4,marker='*', color='red')
+#plt.legend(['TSTT_UE','TSTT_MULTI'],loc='upper right')
+plt.title('TSTT Difference')
 plt.xlabel('CAV PROP')
-plt.ylabel('TSTT')
+plt.ylabel('TSTT Diff')
+
+plt.show()'''
+
+'''count = 0
+for i in outputSO.linkSet:
+    count = count + 1
+    names['extHDV' + str(count)] = float(str(outputSO.linkSet[i].flowHDV))
+    names['extCAV' + str(count)] = float(str(outputSO.linkSet[i].flowCAV))
+    names['extcostHDV' + str(count)] = float(str(outputSO.linkSet[i].costHDV))
+    names['extcostCAV' + str(count)] = float(str(outputSO.linkSet[i].costCAV))
+    if count >= 23:
+        break'''
+
+
+
+'''TSTTSO=[TSTTSO1,TSTTSO2,TSTTSO3,TSTTSO4]
+fig1, ax1 = plt.subplots()
+ax1.set_title('TSTT Distribution due to Platooning Intensity with Different ML Portions')
+ax1.set_xlabel('Ea Cases')
+ax1.set_ylabel('TSTT')
+labels=['Ea=0.2','Ea=0.3','Ea=0.4','Ea=0.5']
+ax1.boxplot(TSTTSO,labels=labels,showfliers=False)
 
 plt.show()
+'''
+
+
+
+'''        total_system_travel_time_equilibrium, outputUE, iteration_numberUE = computeAssingment(net_file=net_file,
+                                                                           algorithm="FW",
+                                                                           systemOptimal=False,
+                                                                           verbose=True,
+                                                                           accuracy=1e-4,
+                                                                           maxIter=5000,
+                                                                           maxTime=6000000)
+        TSTTUE = np.append(TSTTUE, total_system_travel_time_equilibrium)
+        TSTTSO = np.append(TSTTSO, total_system_travel_time_optimal)
+        TSTTGAP=TSTTUE-TSTTSO'''
+        #iteration_number_listFW = np.append(iteration_number_listFW, iteration_numberFW)
+        #iteration_number_listMSA = np.append(iteration_number_listMSA, iteration_numberMSA)
+    # print("UE - SO = ", total_system_travel_time_equilibrium - total_system_travel_time_optimal)
+
+
+'''        count = 0
+        for i in outputUE.linkSet:
+            count = count + 1
+            names['extHDV'+str(count)] = float(str(outputUE.linkSet[i].flowHDV))
+            names['extCAV'+str(count)] = float(str(outputUE.linkSet[i].flowCAV))
+            names['extcostHDV' + str(count)] = float(str(outputUE.linkSet[i].costHDV))
+            names['extcostCAV' + str(count)] = float(str(outputUE.linkSet[i].costCAV))
+            if count >=19:
+                break
+
+        for i in [5]:
+            names['linkflowHDV' + str(i)] = np.append(names.get('linkflowHDV' + str(i)), names.get('extHDV' + str(i)))
+            names['linkflowCAV' + str(i)] = np.append(names.get('linkflowCAV' + str(i)), names.get('extCAV' + str(i)))'''
+
+
+
+
 
 '''        for i in [1,5,7,9,11]:
             ODCOST_SUB_1 = ODCOST_SUB_1 + names.get('extcostHDV' + str(i)) + names.get('extcostCAV' + str(i))
@@ -1086,5 +1414,5 @@ plt.title('TSTT Difference')
 plt.xlabel('CAV PROP')
 plt.ylabel('TSTT Diff')
 
-plt.show()
-'''
+plt.show()'''
+
